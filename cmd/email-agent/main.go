@@ -143,21 +143,23 @@ func main() {
 			activePrompt, skillName := skills.ResolveSkill(cfg.SkillsDir, msg.Subject, msg.BodyText, systemPrompt)
 			log.Printf("[INFO] Using skill %q for UID=%d", skillName, msg.UID)
 
+			// 4. Reconstruct conversation thread history (check local cache first, fallback to IMAP)
+			fetcher := func(msgID string) (*models.EmailMessage, error) {
+				if localMsg, err := emailDB.GetEmailByMessageID(msgID); err == nil && localMsg != nil {
+					return localMsg, nil
+				}
+				return emailTransport.FetchByMessageID(ctx, msgID)
+			}
+
+			turns, err := parser.AssembleThread(fetcher, msg.References, msg, cfg.GmailAddress)
+			if err != nil {
+				log.Printf("[ERROR] Failed assembling thread history for UID=%d: %v", msg.UID, err)
+				continue
+			}
+			log.Printf("[INFO] Assembled conversation thread with %d turn(s) for UID=%d", len(turns), msg.UID)
+
 			var replyMarkdown string
 			if cfg.AIBackend == "antigravity" {
-				// Thread root ID for conversation mapping
-				rootThreadID := msg.MessageID
-				if len(msg.References) > 0 {
-					rootThreadID = msg.References[0]
-				} else if msg.InReplyTo != "" {
-					rootThreadID = msg.InReplyTo
-				}
-
-				convID, err := emailDB.GetConversationID(rootThreadID)
-				if err != nil {
-					log.Printf("[WARN] Failed getting conversation ID: %v", err)
-				}
-
 				var promptBuilder strings.Builder
 				promptBuilder.WriteString(fmt.Sprintf("Inbound email from: %s\nSubject: %s\nDate: %s\n",
 					msg.Sender, msg.Subject, msg.Date.Format(time.RFC1123Z)))
@@ -171,29 +173,20 @@ func main() {
 					promptBuilder.WriteString(fmt.Sprintf("\n[Active Skill - %s]:\n%s\n", skillName, activePrompt))
 				}
 
-				// Cross-account awareness: inject recent email history across all owner addresses
-				recentEmails, err := emailDB.GetRecentEmails(8)
-				if err == nil && len(recentEmails) > 0 {
-					var historyItems []string
-					for _, r := range recentEmails {
-						if r.MessageID == msg.MessageID {
-							continue
+				if len(turns) > 1 {
+					promptBuilder.WriteString("\n[Conversation Thread History]:\n")
+					for i, t := range turns {
+						roleLabel := "User"
+						if t.Role == "model" {
+							roleLabel = "Assistant"
 						}
-						snippet := strings.TrimSpace(r.BodyText)
-						if len(snippet) > 250 {
-							snippet = snippet[:250] + "..."
-						}
-						historyItems = append(historyItems, fmt.Sprintf("- [%s] From: %s | Subject: %q\n  Snippet: %s",
-							r.Date.Format("2006-01-02 15:04"), r.Sender, r.Subject, snippet))
+						promptBuilder.WriteString(fmt.Sprintf("Turn %d (%s):\n%s\n\n", i+1, roleLabel, strings.TrimSpace(t.Content)))
 					}
-					if len(historyItems) > 0 {
-						promptBuilder.WriteString(fmt.Sprintf("\n[Recent Cross-Account Email History]:\nNote: All whitelisted senders (%s) are the same owner. Context matches across accounts.\n", strings.Join(cfg.AllowedSenders, ", ")))
-						promptBuilder.WriteString(strings.Join(historyItems, "\n"))
-						promptBuilder.WriteString("\n")
-					}
+				} else {
+					promptBuilder.WriteString(fmt.Sprintf("\nEmail Content:\n%s\n", msg.BodyText))
 				}
 
-				// If email asks about previous discussion or search, run FTS match
+				// Automated keyword search match injection
 				lowerBody := strings.ToLower(msg.Subject + " " + msg.BodyText)
 				if strings.Contains(lowerBody, "discuss") ||
 					strings.Contains(lowerBody, "last time") ||
@@ -219,48 +212,23 @@ func main() {
 									m.Date.Format("2006-01-02 15:04"), m.Sender, m.Subject, snip))
 							}
 							if len(matchItems) > 0 {
-								promptBuilder.WriteString(fmt.Sprintf("\n[Relevant Past Matches for %q]:\n%s\n", cleanW, strings.Join(matchItems, "\n")))
+								promptBuilder.WriteString(fmt.Sprintf("\n[Relevant Past Email Archive Matches for %q]:\n%s\n", cleanW, strings.Join(matchItems, "\n")))
 								break
 							}
 						}
 					}
 				}
 
-				promptBuilder.WriteString(fmt.Sprintf("\nEmail Content:\n%s\n\nPlease write a concise, professional reply to the sender.", msg.BodyText))
+				promptBuilder.WriteString("\nPlease write a concise, professional reply to the sender.")
 
-				if convID != "" {
-					log.Printf("[INFO] Dispatching to Antigravity CLI (resuming conversation=%s)...", convID)
-				} else {
-					log.Printf("[INFO] Dispatching to Antigravity CLI (new conversation for thread %s)...", rootThreadID)
-				}
-
-				execRes, err := agyRunner.Execute(ctx, convID, promptBuilder.String())
+				log.Printf("[INFO] Dispatching to Antigravity CLI (stateless execution)...")
+				replyMarkdown, err = agyRunner.Execute(ctx, promptBuilder.String())
 				if err != nil {
 					log.Printf("[ERROR] Antigravity execution failed for UID=%d: %v", msg.UID, err)
 					continue
 				}
-				replyMarkdown = execRes.Response
-				if execRes.ConversationID != "" && execRes.ConversationID != convID {
-					_ = emailDB.SaveConversationID(rootThreadID, execRes.ConversationID)
-					log.Printf("[INFO] Linked thread %s to Antigravity conversation %s", rootThreadID, execRes.ConversationID)
-				}
 			} else {
 				activeGemini := geminiClient.WithSystemPrompt(activePrompt)
-
-				// 4. Reconstruct zero-DB thread history (check local cache first, fallback to IMAP)
-				fetcher := func(msgID string) (*models.EmailMessage, error) {
-					if localMsg, err := emailDB.GetEmailByMessageID(msgID); err == nil && localMsg != nil {
-						return localMsg, nil
-					}
-					return emailTransport.FetchByMessageID(ctx, msgID)
-				}
-
-				turns, err := parser.AssembleThread(fetcher, msg.References, msg, cfg.GmailAddress)
-				if err != nil {
-					log.Printf("[ERROR] Failed assembling thread history for UID=%d: %v", msg.UID, err)
-					continue
-				}
-				log.Printf("[INFO] Assembled conversation thread with %d turn(s) for UID=%d", len(turns), msg.UID)
 
 				// 5. Define personal email search callback for Gemini tool use
 				searchCallback := func(query string) (string, error) {

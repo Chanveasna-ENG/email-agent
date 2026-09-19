@@ -76,8 +76,9 @@ if [ ! -f "${SCRIPT_DIR}/bin/email-agent" ]; then
   fi
 
   if command -v go >/dev/null 2>&1; then
-    echo "==> Compiling static Linux binary (bin/email-agent)..."
+    echo "==> Compiling static Linux binaries (email-agent & email-search)..."
     (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-agent ./cmd/email-agent)
+    (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-search ./cmd/email-search)
   else
     echo "[ERROR] 'bin/email-agent' not found and 'go' could not be found." >&2
     echo "        Run 'sudo apt install -y golang-go' and re-run this script." >&2
@@ -113,15 +114,13 @@ mkdir -p /etc/email-agent
 cp "${SCRIPT_DIR}/bin/email-agent" /opt/email-agent/email-agent
 chmod 0755 /opt/email-agent/email-agent
 
-if [ -d "${SCRIPT_DIR}/skills" ]; then
-  cp -r "${SCRIPT_DIR}/skills" /opt/email-agent/
+if [ -f "${SCRIPT_DIR}/bin/email-search" ]; then
+  cp "${SCRIPT_DIR}/bin/email-search" /opt/email-agent/workspace/email-search
+  chmod 0755 /opt/email-agent/workspace/email-search
 fi
 
-# Provision workspace helper scripts for Antigravity CLI tools
-mkdir -p /opt/email-agent/workspace/scripts
-if [ -f "${SCRIPT_DIR}/scripts/search_emails.py" ]; then
-  cp "${SCRIPT_DIR}/scripts/search_emails.py" /opt/email-agent/workspace/scripts/
-  chmod 0755 /opt/email-agent/workspace/scripts/search_emails.py
+if [ -d "${SCRIPT_DIR}/skills" ]; then
+  cp -r "${SCRIPT_DIR}/skills" /opt/email-agent/
 fi
 
 # Provision credentials file outside workspace

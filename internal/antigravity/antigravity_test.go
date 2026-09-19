@@ -11,18 +11,10 @@ import (
 func TestBuildArgs(t *testing.T) {
 	runner := NewRunner("agy")
 
-	// 1. Without conversation ID
-	args1 := runner.BuildArgs("", "Hello world")
-	expected1 := []string{"--dangerously-skip-permissions", "--output-format", "json", "-p", "Hello world"}
-	if !reflect.DeepEqual(args1, expected1) {
-		t.Errorf("BuildArgs without conversation = %v, want %v", args1, expected1)
-	}
-
-	// 2. With conversation ID
-	args2 := runner.BuildArgs("thread-abc-123", "Continue task")
-	expected2 := []string{"--conversation", "thread-abc-123", "--dangerously-skip-permissions", "--output-format", "json", "-p", "Continue task"}
-	if !reflect.DeepEqual(args2, expected2) {
-		t.Errorf("BuildArgs with conversation = %v, want %v", args2, expected2)
+	args := runner.BuildArgs("Hello world")
+	expected := []string{"--dangerously-skip-permissions", "--output-format", "json", "-p", "Hello world"}
+	if !reflect.DeepEqual(args, expected) {
+		t.Errorf("BuildArgs = %v, want %v", args, expected)
 	}
 }
 
@@ -42,7 +34,7 @@ func TestExecuteSuccess(t *testing.T) {
 	}
 
 	runner := NewRunner("agy").WithWorkspace("/tmp/test-workspace").WithExecutor(mockExecutor)
-	result, err := runner.Execute(ctx, "conv-1", "Fix the bug")
+	result, err := runner.Execute(ctx, "Fix the bug")
 	if err != nil {
 		t.Fatalf("Execute returned unexpected error: %v", err)
 	}
@@ -54,14 +46,11 @@ func TestExecuteSuccess(t *testing.T) {
 	if executedDir != "/tmp/test-workspace" {
 		t.Errorf("executedDir = %q, want /tmp/test-workspace", executedDir)
 	}
-	if len(executedArgs) != 7 || executedArgs[1] != "conv-1" {
+	if len(executedArgs) != 5 || executedArgs[4] != "Fix the bug" {
 		t.Errorf("executedArgs = %v", executedArgs)
 	}
-	if result.Response != "Here is the solution to your query." {
-		t.Errorf("CleanOutput result = %q, want stripped text", result.Response)
-	}
-	if result.ConversationID != "conv-123" {
-		t.Errorf("ConversationID = %q, want conv-123", result.ConversationID)
+	if result != "Here is the solution to your query." {
+		t.Errorf("result = %q, want stripped text", result)
 	}
 
 	// Verify env is populated
@@ -77,7 +66,7 @@ func TestExecuteError(t *testing.T) {
 	}
 
 	runner := NewRunner("agy").WithExecutor(mockExecutor)
-	_, err := runner.Execute(ctx, "", "Do something")
+	_, err := runner.Execute(ctx, "Do something")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
