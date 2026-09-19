@@ -7,7 +7,10 @@ if [ "${EUID}" -ne 0 ]; then
   exit 1
 fi
 
-echo "==> Setting up Email AI Assistant on Linux..."
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6 || echo "/home/${REAL_USER}")
+
+echo "==> Setting up Email AI Assistant on Linux for user '${REAL_USER}'..."
 
 # 1. Check dependencies
 for cmd in curl python3; do
@@ -16,20 +19,36 @@ for cmd in curl python3; do
   fi
 done
 
-# 2. Check Antigravity CLI
+# 2. Check Antigravity CLI and ensure system-wide symlink
 if ! command -v agy >/dev/null 2>&1; then
-  echo "[INFO] 'agy' CLI not found in root PATH."
-  echo "      Ensure Antigravity is installed for the user: curl -fsSL https://antigravity.google/cli/install.sh | bash"
+  if [ -f "${REAL_HOME}/.local/bin/agy" ]; then
+    echo "==> Found 'agy' in ${REAL_HOME}/.local/bin/agy. Creating system symlink in /usr/local/bin/agy..."
+    ln -sf "${REAL_HOME}/.local/bin/agy" /usr/local/bin/agy
+  else
+    echo "[WARN] 'agy' CLI not found in PATH or ~/.local/bin."
+    echo "       Install for ${REAL_USER}: curl -fsSL https://antigravity.google/cli/install.sh | bash"
+  fi
 fi
 
-# 3. Compile static binary if missing
+# 3. Check or compile static binary
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ ! -f "${SCRIPT_DIR}/bin/email-agent" ]; then
-  echo "==> Compiling static Linux binary..."
+  if ! command -v go >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      echo "==> 'go' compiler not found. Installing golang-go via apt..."
+      apt-get update -qq && apt-get install -y -qq golang-go
+    elif command -v dnf >/dev/null 2>&1; then
+      echo "==> 'go' compiler not found. Installing golang via dnf..."
+      dnf install -y -q golang
+    fi
+  fi
+
   if command -v go >/dev/null 2>&1; then
+    echo "==> Compiling static Linux binary (bin/email-agent)..."
     (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-agent ./cmd/email-agent)
   else
-    echo "[ERROR] 'bin/email-agent' not found and 'go' is not installed. Compile on your dev machine first (make build-linux)." >&2
+    echo "[ERROR] 'bin/email-agent' not found and 'go' could not be found." >&2
+    echo "        Run 'sudo apt install -y golang-go' and re-run this script." >&2
     exit 1
   fi
 fi
@@ -42,7 +61,16 @@ else
   echo "==> System user 'emailagent' already exists."
 fi
 
-# 5. Provision directories
+# 5. Sync Antigravity auth credentials from the invoking user to emailagent
+if [ -d "${REAL_HOME}/.gemini" ]; then
+  echo "==> Syncing Antigravity CLI credentials from ${REAL_USER} to emailagent..."
+  mkdir -p /home/emailagent/.gemini
+  cp -r "${REAL_HOME}/.gemini/." /home/emailagent/.gemini/
+  chown -R emailagent:emailagent /home/emailagent/.gemini
+  chmod 0700 /home/emailagent/.gemini
+fi
+
+# 6. Provision directories
 echo "==> Provisioning directories in /opt/email-agent and /etc/email-agent..."
 mkdir -p /opt/email-agent/data
 mkdir -p /opt/email-agent/workspace
@@ -75,7 +103,7 @@ chown -R root:root /opt/email-agent
 chown -R emailagent:emailagent /opt/email-agent/data /opt/email-agent/workspace /home/emailagent
 chmod 0750 /opt/email-agent/data /opt/email-agent/workspace
 
-# 6. Install hardened systemd service unit
+# 7. Install hardened systemd service unit
 echo "==> Installing hardened systemd service (/etc/systemd/system/email-agent.service)..."
 cat <<'EOF' > /etc/systemd/system/email-agent.service
 [Unit]
@@ -90,6 +118,7 @@ WorkingDirectory=/opt/email-agent
 ExecStart=/opt/email-agent/email-agent
 Restart=always
 RestartSec=5
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/etc/email-agent/.env
 
 # Linux namespace hardening & sandboxing
@@ -105,7 +134,7 @@ ReadWritePaths=/opt/email-agent/data /opt/email-agent/workspace /home/emailagent
 WantedBy=multi-user.target
 EOF
 
-# 7. Reload systemd
+# 8. Reload systemd
 systemctl daemon-reload
 
 echo "============================================================"
