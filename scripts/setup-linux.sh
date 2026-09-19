@@ -62,28 +62,29 @@ else
   fi
 fi
 
-# 3. Check or compile static binary
+# 3. Check and always recompile static binaries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ ! -f "${SCRIPT_DIR}/bin/email-agent" ]; then
-  if ! command -v go >/dev/null 2>&1; then
-    if command -v apt-get >/dev/null 2>&1; then
-      echo "==> 'go' compiler not found. Installing golang-go via apt..."
-      apt-get update -qq && apt-get install -y -qq golang-go
-    elif command -v dnf >/dev/null 2>&1; then
-      echo "==> 'go' compiler not found. Installing golang via dnf..."
-      dnf install -y -q golang
-    fi
+if ! command -v go >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "==> 'go' compiler not found. Installing golang-go via apt..."
+    apt-get update -qq && apt-get install -y -qq golang-go
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "==> 'go' compiler not found. Installing golang via dnf..."
+    dnf install -y -q golang
   fi
+fi
 
-  if command -v go >/dev/null 2>&1; then
-    echo "==> Compiling static Linux binaries (email-agent & email-search)..."
-    (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-agent ./cmd/email-agent)
-    (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-search ./cmd/email-search)
-  else
-    echo "[ERROR] 'bin/email-agent' not found and 'go' could not be found." >&2
-    echo "        Run 'sudo apt install -y golang-go' and re-run this script." >&2
-    exit 1
-  fi
+if command -v go >/dev/null 2>&1; then
+  echo "==> Rebuilding static Linux binaries (email-agent & email-search)..."
+  mkdir -p "${SCRIPT_DIR}/bin"
+  (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-agent ./cmd/email-agent)
+  (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-search ./cmd/email-search)
+elif [ ! -f "${SCRIPT_DIR}/bin/email-agent" ]; then
+  echo "[ERROR] 'bin/email-agent' not found and 'go' could not be found." >&2
+  echo "        Run 'sudo apt install -y golang-go' and re-run this script." >&2
+  exit 1
+else
+  echo "==> 'go' not installed, using precompiled bin/email-agent."
 fi
 
 # 4. Create dedicated unprivileged system user
@@ -176,8 +177,12 @@ ReadWritePaths=/opt/email-agent/data /opt/email-agent/workspace /home/emailagent
 WantedBy=multi-user.target
 EOF
 
-# 8. Reload systemd
+# 8. Reload systemd and restart service if active
 systemctl daemon-reload
+if systemctl is-active --quiet email-agent; then
+  echo "==> Restarting email-agent daemon with new binary..."
+  systemctl restart email-agent
+fi
 
 echo "============================================================"
 echo " [SUCCESS] Email AI Assistant daemon setup complete!"
