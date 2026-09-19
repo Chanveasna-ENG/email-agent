@@ -170,6 +170,62 @@ func main() {
 				if activePrompt != "" {
 					promptBuilder.WriteString(fmt.Sprintf("\n[Active Skill - %s]:\n%s\n", skillName, activePrompt))
 				}
+
+				// Cross-account awareness: inject recent email history across all owner addresses
+				recentEmails, err := emailDB.GetRecentEmails(8)
+				if err == nil && len(recentEmails) > 0 {
+					var historyItems []string
+					for _, r := range recentEmails {
+						if r.MessageID == msg.MessageID {
+							continue
+						}
+						snippet := strings.TrimSpace(r.BodyText)
+						if len(snippet) > 250 {
+							snippet = snippet[:250] + "..."
+						}
+						historyItems = append(historyItems, fmt.Sprintf("- [%s] From: %s | Subject: %q\n  Snippet: %s",
+							r.Date.Format("2006-01-02 15:04"), r.Sender, r.Subject, snippet))
+					}
+					if len(historyItems) > 0 {
+						promptBuilder.WriteString(fmt.Sprintf("\n[Recent Cross-Account Email History]:\nNote: All whitelisted senders (%s) are the same owner. Context matches across accounts.\n", strings.Join(cfg.AllowedSenders, ", ")))
+						promptBuilder.WriteString(strings.Join(historyItems, "\n"))
+						promptBuilder.WriteString("\n")
+					}
+				}
+
+				// If email asks about previous discussion or search, run FTS match
+				lowerBody := strings.ToLower(msg.Subject + " " + msg.BodyText)
+				if strings.Contains(lowerBody, "discuss") ||
+					strings.Contains(lowerBody, "last time") ||
+					strings.Contains(lowerBody, "previous") ||
+					strings.Contains(lowerBody, "earlier") ||
+					strings.Contains(lowerBody, "remember") ||
+					strings.Contains(lowerBody, "search") {
+					words := strings.Fields(msg.Subject + " " + msg.BodyText)
+					for _, w := range words {
+						cleanW := strings.Trim(w, "?.,!\"'()[]")
+						if len(cleanW) > 3 {
+							matches, _ := emailDB.SearchEmails(cleanW, 3)
+							var matchItems []string
+							for _, m := range matches {
+								if m.MessageID == msg.MessageID {
+									continue
+								}
+								snip := strings.TrimSpace(m.BodyText)
+								if len(snip) > 200 {
+									snip = snip[:200] + "..."
+								}
+								matchItems = append(matchItems, fmt.Sprintf("- [%s] From: %s | Subject: %q | %s",
+									m.Date.Format("2006-01-02 15:04"), m.Sender, m.Subject, snip))
+							}
+							if len(matchItems) > 0 {
+								promptBuilder.WriteString(fmt.Sprintf("\n[Relevant Past Matches for %q]:\n%s\n", cleanW, strings.Join(matchItems, "\n")))
+								break
+							}
+						}
+					}
+				}
+
 				promptBuilder.WriteString(fmt.Sprintf("\nEmail Content:\n%s\n\nPlease write a concise, professional reply to the sender.", msg.BodyText))
 
 				if convID != "" {

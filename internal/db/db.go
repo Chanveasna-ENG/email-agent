@@ -209,6 +209,46 @@ func (e *EmailDB) SearchEmails(query string, limit int) ([]*models.EmailMessage,
 	return results, nil
 }
 
+// GetRecentEmails retrieves the latest emails across all cached messages in chronological order.
+func (e *EmailDB) GetRecentEmails(limit int) ([]*models.EmailMessage, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	query := `
+		SELECT message_id, in_reply_to, subject, sender, sender_email, body_text, date
+		FROM emails
+		ORDER BY date DESC
+		LIMIT ?;
+	`
+
+	rows, err := e.db.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent emails: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*models.EmailMessage
+	for rows.Next() {
+		var msg models.EmailMessage
+		var inReplyTo sql.NullString
+		if err := rows.Scan(&msg.MessageID, &inReplyTo, &msg.Subject, &msg.Sender, &msg.SenderEmail, &msg.BodyText, &msg.Date); err != nil {
+			continue
+		}
+		if inReplyTo.Valid {
+			msg.InReplyTo = inReplyTo.String
+		}
+		results = append(results, &msg)
+	}
+
+	// Reverse to ascending order (oldest to newest)
+	for i, j := 0, len(results)-1; i < j; i, j = i+1, j-1 {
+		results[i], results[j] = results[j], results[i]
+	}
+
+	return results, nil
+}
+
 // GetConversationID returns the mapped Antigravity conversation ID for a given thread root.
 func (e *EmailDB) GetConversationID(threadID string) (string, error) {
 	cleanID := strings.TrimSpace(threadID)

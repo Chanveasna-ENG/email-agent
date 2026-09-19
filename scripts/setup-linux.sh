@@ -117,6 +117,13 @@ if [ -d "${SCRIPT_DIR}/skills" ]; then
   cp -r "${SCRIPT_DIR}/skills" /opt/email-agent/
 fi
 
+# Provision workspace helper scripts for Antigravity CLI tools
+mkdir -p /opt/email-agent/workspace/scripts
+if [ -f "${SCRIPT_DIR}/scripts/search_emails.py" ]; then
+  cp "${SCRIPT_DIR}/scripts/search_emails.py" /opt/email-agent/workspace/scripts/
+  chmod 0755 /opt/email-agent/workspace/scripts/search_emails.py
+fi
+
 # Provision credentials file outside workspace
 if [ ! -f /etc/email-agent/.env ]; then
   if [ -f "${SCRIPT_DIR}/.env" ]; then

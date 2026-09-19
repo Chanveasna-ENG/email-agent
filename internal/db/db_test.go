@@ -128,3 +128,46 @@ func TestThreadConversations(t *testing.T) {
 		t.Fatalf("expected updated conv-uuid-2, got %q", updated)
 	}
 }
+
+func TestGetRecentEmails(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_recent.db")
+
+	emailDB, err := NewEmailDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewEmailDB failed: %v", err)
+	}
+	defer emailDB.Close()
+
+	now := time.Now()
+	msg1 := &models.EmailMessage{
+		MessageID:   "<1@test>",
+		Subject:     "First",
+		Sender:      "User <user@test>",
+		SenderEmail: "user@test",
+		BodyText:    "First message",
+		Date:        now.Add(-10 * time.Minute),
+	}
+	msg2 := &models.EmailMessage{
+		MessageID:   "<2@test>",
+		Subject:     "Second",
+		Sender:      "User2 <user2@test>",
+		SenderEmail: "user2@test",
+		BodyText:    "Second message",
+		Date:        now.Add(-5 * time.Minute),
+	}
+
+	_ = emailDB.SaveEmail(msg1)
+	_ = emailDB.SaveEmail(msg2)
+
+	recent, err := emailDB.GetRecentEmails(5)
+	if err != nil {
+		t.Fatalf("GetRecentEmails failed: %v", err)
+	}
+	if len(recent) != 2 {
+		t.Fatalf("expected 2 recent emails, got %d", len(recent))
+	}
+	if recent[0].MessageID != "<1@test>" || recent[1].MessageID != "<2@test>" {
+		t.Fatalf("expected chronological order, got %s then %s", recent[0].MessageID, recent[1].MessageID)
+	}
+}
