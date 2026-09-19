@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"reflect"
+	"strings"
 	"testing"
+
+	gomail "github.com/emersion/go-message/mail"
 )
 
 func TestExtractEmailAddress(t *testing.T) {
@@ -151,5 +155,60 @@ func TestNormalizeSubject(t *testing.T) {
 		if got != tc.expected {
 			t.Errorf("NormalizeSubject(%q) = %q, want %q", tc.input, got, tc.expected)
 		}
+	}
+}
+
+func TestExtractEmailParts(t *testing.T) {
+	var buf bytes.Buffer
+	mw, err := gomail.CreateWriter(&buf, gomail.Header{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Plain text part
+	var textHeader gomail.InlineHeader
+	textHeader.Set("Content-Type", "text/plain; charset=utf-8")
+	tw, err := mw.CreateSingleInline(textHeader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = tw.Write([]byte("Hello world email body"))
+	_ = tw.Close()
+
+	// 2. Attachment part
+	var attHeader gomail.AttachmentHeader
+	attHeader.SetFilename("test.pdf")
+	attHeader.Set("Content-Type", "application/pdf")
+	aw, err := mw.CreateAttachment(attHeader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = aw.Write([]byte("%PDF-fake-data"))
+	_ = aw.Close()
+	_ = mw.Close()
+
+	// Parse back
+	mr, err := gomail.CreateReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, atts, err := ExtractEmailParts(mr)
+	if err != nil {
+		t.Fatalf("ExtractEmailParts failed: %v", err)
+	}
+
+	if strings.TrimSpace(body) != "Hello world email body" {
+		t.Errorf("body = %q, want 'Hello world email body'", body)
+	}
+
+	if len(atts) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(atts))
+	}
+	if atts[0].Filename != "test.pdf" {
+		t.Errorf("att.Filename = %q, want test.pdf", atts[0].Filename)
+	}
+	if string(atts[0].Data) != "%PDF-fake-data" {
+		t.Errorf("att.Data = %q, want %%PDF-fake-data", string(atts[0].Data))
 	}
 }

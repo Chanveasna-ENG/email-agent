@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -53,5 +55,39 @@ func TestSliceContains(t *testing.T) {
 	}
 	if sliceContains(slice, "charlie@test.com") {
 		t.Error("expected sliceContains to return false for non-member")
+	}
+}
+
+func TestSaveAttachmentsToDisk(t *testing.T) {
+	tempDir := t.TempDir()
+	messageID := "<test123@domain.com>"
+	attachments := []Attachment{
+		{
+			Filename:    "report.pdf",
+			ContentType: "application/pdf",
+			Data:        []byte("%PDF-dummy"),
+		},
+		{
+			Filename:    "../../evil.sh",
+			ContentType: "text/plain",
+			Data:        []byte("echo pwn"),
+		},
+	}
+
+	err := saveAttachmentsToDisk(tempDir, messageID, attachments)
+	if err != nil {
+		t.Fatalf("saveAttachmentsToDisk failed: %v", err)
+	}
+
+	// Verify report.pdf exists
+	expectedPath := filepath.Join(tempDir, "test123@domain.com", "report.pdf")
+	if data, err := os.ReadFile(expectedPath); err != nil || string(data) != "%PDF-dummy" {
+		t.Errorf("failed reading expected file %s: %v", expectedPath, err)
+	}
+
+	// Verify path traversal sanitized (evil.sh inside test123@domain.com folder)
+	evilPath := filepath.Join(tempDir, "test123@domain.com", "evil.sh")
+	if data, err := os.ReadFile(evilPath); err != nil || string(data) != "echo pwn" {
+		t.Errorf("failed reading sanitized evil.sh at %s: %v", evilPath, err)
 	}
 }

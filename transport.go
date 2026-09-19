@@ -6,10 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
 	"net/smtp"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -209,11 +209,11 @@ func (t *EmailTransport) fetchMessageByUID(client *imapclient.Client, uid imap.U
 		return nil, nil
 	}
 
-	return parseRawEmail(uint32(buf.UID), rawBody)
+	return parseRawEmail(uint32(buf.UID), rawBody, t.cfg.AttachmentsDir)
 }
 
-// parseRawEmail decodes MIME headers and text body.
-func parseRawEmail(uid uint32, rawBytes []byte) (*EmailMessage, error) {
+// parseRawEmail decodes MIME headers, plain text body, and extracts attachments.
+func parseRawEmail(uid uint32, rawBytes []byte, attachmentsDir string) (*EmailMessage, error) {
 	mr, err := mail.CreateReader(bytes.NewReader(rawBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create mail reader: %w", err)
@@ -234,30 +234,15 @@ func parseRawEmail(uid uint32, rawBytes []byte) (*EmailMessage, error) {
 	rawReferences := header.Get("References")
 	references := ParseReferences(rawReferences)
 
-	var bodyText string
-	for {
-		part, err := mr.NextPart()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			break
-		}
-
-		switch h := part.Header.(type) {
-		case *mail.InlineHeader:
-			contentType, _, _ := h.ContentType()
-			if strings.HasPrefix(contentType, "text/plain") {
-				b, _ := io.ReadAll(part.Body)
-				bodyText = string(b)
-				break
-			}
-		}
-	}
+	bodyText, attachments, _ := ExtractEmailParts(mr)
 
 	// Fallback if multipart had no plain text
 	if bodyText == "" {
 		bodyText = string(rawBytes)
+	}
+
+	if err := saveAttachmentsToDisk(attachmentsDir, messageID, attachments); err != nil {
+		// Log or continue; do not abort email receipt on disk write error
 	}
 
 	return &EmailMessage{
@@ -270,7 +255,41 @@ func parseRawEmail(uid uint32, rawBytes []byte) (*EmailMessage, error) {
 		SenderEmail: senderEmail,
 		BodyText:    bodyText,
 		Date:        date,
+		Attachments: attachments,
 	}, nil
+}
+
+// saveAttachmentsToDisk persists extracted attachments to attachments/<message_id>/<filename>.
+func saveAttachmentsToDisk(baseDir, messageID string, attachments []Attachment) error {
+	if len(attachments) == 0 || baseDir == "" {
+		return nil
+	}
+
+	safeID := strings.Trim(messageID, "<>")
+	safeID = strings.ReplaceAll(safeID, "/", "_")
+	safeID = strings.ReplaceAll(safeID, "\\", "_")
+	safeID = strings.ReplaceAll(safeID, ":", "_")
+	if safeID == "" {
+		safeID = fmt.Sprintf("msg_%d", time.Now().UnixNano())
+	}
+
+	targetDir := filepath.Join(baseDir, safeID)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("create attachment directory: %w", err)
+	}
+
+	for i := range attachments {
+		safeName := filepath.Base(attachments[i].Filename)
+		if safeName == "." || safeName == "/" || safeName == "" {
+			safeName = fmt.Sprintf("attachment_%d", i+1)
+		}
+		destPath := filepath.Join(targetDir, safeName)
+		if err := os.WriteFile(destPath, attachments[i].Data, 0644); err == nil {
+			attachments[i].Path = destPath
+		}
+	}
+
+	return nil
 }
 
 // MarkSeen adds the \Seen flag to a message.

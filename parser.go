@@ -1,10 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/mail"
 	"regexp"
 	"strings"
+
+	gomail "github.com/emersion/go-message/mail"
 )
 
 var (
@@ -17,6 +21,8 @@ var (
 		regexp.MustCompile(`(?m)^From:\s+.+`),
 	}
 )
+
+const maxAttachmentBytes = 20 * 1024 * 1024 // 20MB ceiling
 
 // ExtractEmailAddress parses a header like "Alice <alice@example.com>" and returns "alice@example.com".
 func ExtractEmailAddress(raw string) string {
@@ -116,4 +122,72 @@ func NormalizeSubject(subj string) string {
 	clean = reSubjectRegex.ReplaceAllString(clean, "")
 	clean = strings.TrimSpace(clean)
 	return fmt.Sprintf("Re: %s", clean)
+}
+
+// ExtractEmailParts iterates over email MIME parts, extracting plain text body and attachments.
+func ExtractEmailParts(mr *gomail.Reader) (string, []Attachment, error) {
+	var bodyText string
+	var attachments []Attachment
+
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			break
+		}
+
+		switch h := part.Header.(type) {
+		case *gomail.InlineHeader:
+			contentType, _, _ := h.ContentType()
+			disp := h.Get("Content-Disposition")
+			filename := ""
+			if strings.Contains(disp, "filename=") {
+				filename = extractFilenameFromHeader(disp)
+			}
+
+			if filename != "" {
+				data, err := io.ReadAll(io.LimitReader(part.Body, maxAttachmentBytes))
+				if err == nil && len(data) > 0 {
+					attachments = append(attachments, Attachment{
+						Filename:    filename,
+						ContentType: contentType,
+						Data:        data,
+						Size:        int64(len(data)),
+					})
+				}
+			} else if strings.HasPrefix(contentType, "text/plain") && bodyText == "" {
+				b, _ := io.ReadAll(part.Body)
+				bodyText = string(b)
+			}
+		case *gomail.AttachmentHeader:
+			filename, _ := h.Filename()
+			if filename == "" {
+				filename = "attachment"
+			}
+			contentType, _, _ := h.ContentType()
+			data, err := io.ReadAll(io.LimitReader(part.Body, maxAttachmentBytes))
+			if err == nil && len(data) > 0 {
+				attachments = append(attachments, Attachment{
+					Filename:    filename,
+					ContentType: contentType,
+					Data:        data,
+					Size:        int64(len(data)),
+				})
+			}
+		}
+	}
+
+	return bodyText, attachments, nil
+}
+
+func extractFilenameFromHeader(disp string) string {
+	idx := strings.Index(disp, "filename=")
+	if idx == -1 {
+		return ""
+	}
+	fn := strings.TrimSpace(disp[idx+9:])
+	fn = strings.Trim(fn, `";'`)
+	return fn
 }

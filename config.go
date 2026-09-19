@@ -12,30 +12,43 @@ import (
 
 // Config holds runtime configuration for the email agent service.
 type Config struct {
-	GmailAddress     string
-	GmailAppPassword string
-	AllowedSenders   []string
-	GCPProjectID     string
-	GCPLocation      string
-	GeminiModel      string
-	CredentialsPath  string
-	SystemPromptPath string
-	IdleTimeout      time.Duration
-	PollInterval     time.Duration
+	GmailAddress       string
+	GmailAppPassword   string
+	AllowedSenders     []string
+	GeminiAPIKey       string
+	GCPProjectID       string
+	GCPLocation        string
+	GeminiModel        string
+	CredentialsPath    string
+	SystemPromptPath   string
+	DBPath             string
+	AttachmentsDir     string
+	PersonasDir        string
+	EnableGoogleSearch bool
+	IdleTimeout        time.Duration
+	PollInterval       time.Duration
 }
 
 // LoadConfig reads configuration from environment variables and an optional .env file.
 func LoadConfig() (*Config, error) {
 	_ = godotenv.Load() // optional .env file
+	return parseConfig()
+}
 
+// parseConfig extracts and validates configuration from environment variables.
+func parseConfig() (*Config, error) {
 	gmailAddress := strings.TrimSpace(os.Getenv("GMAIL_ADDRESS"))
 	gmailPassword := strings.TrimSpace(os.Getenv("GMAIL_APP_PASSWORD"))
+	geminiAPIKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
 	gcpProjectID := strings.TrimSpace(os.Getenv("GCP_PROJECT_ID"))
 	gcpLocation := strings.TrimSpace(os.Getenv("GCP_LOCATION"))
 	geminiModel := strings.TrimSpace(os.Getenv("GEMINI_MODEL"))
 	credsPath := strings.TrimSpace(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 	promptPath := strings.TrimSpace(os.Getenv("SYSTEM_PROMPT_FILE"))
 	rawSenders := strings.TrimSpace(os.Getenv("ALLOWED_SENDERS"))
+	dbPath := strings.TrimSpace(os.Getenv("DB_PATH"))
+	attachmentsDir := strings.TrimSpace(os.Getenv("ATTACHMENTS_DIR"))
+	personasDir := strings.TrimSpace(os.Getenv("PERSONAS_DIR"))
 
 	if gmailAddress == "" {
 		return nil, fmt.Errorf("GMAIL_ADDRESS is required")
@@ -43,11 +56,11 @@ func LoadConfig() (*Config, error) {
 	if gmailPassword == "" {
 		return nil, fmt.Errorf("GMAIL_APP_PASSWORD is required")
 	}
-	if gcpProjectID == "" {
-		return nil, fmt.Errorf("GCP_PROJECT_ID is required")
-	}
 	if rawSenders == "" {
 		return nil, fmt.Errorf("ALLOWED_SENDERS is required (comma-separated email list)")
+	}
+	if geminiAPIKey == "" && gcpProjectID == "" {
+		return nil, fmt.Errorf("either GEMINI_API_KEY or GCP_PROJECT_ID is required")
 	}
 
 	if gcpLocation == "" {
@@ -57,7 +70,24 @@ func LoadConfig() (*Config, error) {
 		geminiModel = "gemini-2.5-flash"
 	}
 	if promptPath == "" {
-		promptPath = "system_prompt.txt"
+		promptPath = "config/system_prompt.txt"
+		if _, err := os.Stat(promptPath); os.IsNotExist(err) {
+			promptPath = "system_prompt.txt"
+		}
+	}
+	if dbPath == "" {
+		dbPath = "emails.db"
+	}
+	if attachmentsDir == "" {
+		attachmentsDir = "attachments"
+	}
+	if personasDir == "" {
+		personasDir = "personas"
+	}
+
+	enableGoogleSearch := true
+	if rawSearch := strings.ToLower(strings.TrimSpace(os.Getenv("ENABLE_GOOGLE_SEARCH"))); rawSearch == "false" || rawSearch == "0" {
+		enableGoogleSearch = false
 	}
 
 	idleTimeout := 29 * time.Minute
@@ -83,15 +113,20 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		GmailAddress:     gmailAddress,
-		GmailAppPassword: gmailPassword,
-		AllowedSenders:   allowedSenders,
-		GCPProjectID:     gcpProjectID,
-		GCPLocation:      gcpLocation,
-		GeminiModel:      geminiModel,
-		CredentialsPath:  credsPath,
-		SystemPromptPath: promptPath,
-		IdleTimeout:      idleTimeout,
-		PollInterval:     pollInterval,
+		GmailAddress:       gmailAddress,
+		GmailAppPassword:   gmailPassword,
+		AllowedSenders:     allowedSenders,
+		GeminiAPIKey:       geminiAPIKey,
+		GCPProjectID:       gcpProjectID,
+		GCPLocation:        gcpLocation,
+		GeminiModel:        geminiModel,
+		CredentialsPath:    credsPath,
+		SystemPromptPath:   promptPath,
+		DBPath:             dbPath,
+		AttachmentsDir:     attachmentsDir,
+		PersonasDir:        personasDir,
+		EnableGoogleSearch: enableGoogleSearch,
+		IdleTimeout:        idleTimeout,
+		PollInterval:       pollInterval,
 	}, nil
 }
