@@ -136,6 +136,7 @@ chmod 0640 /etc/email-agent/.env
 chown -R root:root /opt/email-agent
 chown -R emailagent:emailagent /opt/email-agent/data /opt/email-agent/workspace /home/emailagent
 chmod 0750 /opt/email-agent/data /opt/email-agent/workspace
+chmod -R u+rwX /home/emailagent
 
 # 7. Install hardened systemd service unit
 echo "==> Installing hardened systemd service (/etc/systemd/system/email-agent.service)..."
@@ -158,7 +159,7 @@ EnvironmentFile=/etc/email-agent/.env
 
 # Linux namespace hardening & sandboxing
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 PrivateTmp=true
 NoNewPrivileges=true
 ProtectKernelTunables=true
