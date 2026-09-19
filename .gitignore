@@ -1,0 +1,32 @@
+# Environment variables and secrets
+.env
+credential/
+*.json
+!package.json
+
+# Binaries and build outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test coverage artifacts
+coverage.out
+coverage.html
+*.test
+
+# OS artifacts
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
