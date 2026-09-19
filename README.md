@@ -1,6 +1,6 @@
 # Email AI Assistant (Go)
 
-A personal AI assistant communicating directly through your email client interface. Inbound emails are detected in real-time via IMAP IDLE, threaded conversation context is reconstructed directly from Gmail headers and local SQLite cache, answers are generated using Google Gemini (Google AI Studio API Key or GCP Vertex AI), and replies are dispatched via authenticated SMTP with clean, minimal HTML formatting.
+A personal AI assistant communicating directly through your email client interface. Inbound emails are detected in real-time via IMAP IDLE, threaded conversation context is reconstructed directly from Gmail headers and local SQLite cache, answers are generated via **Google Antigravity CLI** (`agy` using your Pro subscription) or direct **Google Gemini** (API Key or GCP Vertex AI), and replies are dispatched via authenticated SMTP with clean, minimal HTML formatting.
 
 ## Architecture & Project Structure
 
@@ -10,16 +10,20 @@ A personal AI assistant communicating directly through your email client interfa
 │   └── email-agent/
 │       └── main.go              # Main daemon entrypoint
 ├── internal/
+│   ├── antigravity/             # Antigravity CLI (agy) runner with conversation mapping
 │   ├── config/                  # Configuration loader & validation
-│   ├── db/                      # SQLite FTS5 caching & search (modernc.org/sqlite, pure Go)
+│   ├── db/                      # SQLite FTS5 caching, search & thread-to-conversation mapping
 │   ├── gemini/                  # Google GenAI SDK integration (tools, multimodal, search)
 │   ├── models/                  # Shared domain types (EmailMessage, Attachment, ConversationTurn)
 │   ├── parser/                  # MIME parsing, HTML formatting, loop detection, thread reconstruction
-│   ├── personas/                # Persona dynamic resolution based on subject/body tags
+│   ├── skills/                  # Skills loader with YAML frontmatter parsing and tag resolution
 │   └── transport/               # Gmail IMAP IDLE listener & SMTP sender
 ├── data/                        # Persistent storage (emails.db, attachments/)
-├── personas/                    # Dynamic persona prompt files (default.txt, coder.txt, etc.)
-├── Dockerfile                   # Multi-stage distroless container build
+├── skills/                      # Antigravity & Claude compatible skills
+│   ├── default/SKILL.md         # General assistant skill
+│   ├── coder/SKILL.md           # Senior software architect skill
+│   └── writer/SKILL.md          # Copywriting & editing skill
+├── Dockerfile                   # Multi-stage distroless container build (Gemini backend)
 ├── docker-compose.yml           # Linux deployment config (always restart, non-root)
 ├── Makefile                     # Build & docker commands
 └── build.ps1                    # PowerShell build & test script
@@ -28,15 +32,16 @@ A personal AI assistant communicating directly through your email client interfa
 ## Features
 
 - **Email Client Interface**: Text with your AI agent as naturally as emailing a colleague.
-- **Zero-DB & Cached Thread Reconstruction**: Reconstructs multi-turn dialogue from Gmail IMAP headers (`Message-ID`, `References`, `In-Reply-To`) with local SQLite fallback.
+- **Hybrid AI Engine (`AI_BACKEND`)**:
+  - **Antigravity CLI (Default)**: Uses local `agy` CLI logged in with your Google Antigravity account. Leverages your Pro subscription quota with zero per-token cost, autonomous tool execution (`--dangerously-skip-permissions`), and Antigravity conversation continuity (`--conversation`).
+  - **Google Gemini**: Direct cloud API calls via Google AI Studio API Key or Vertex AI.
+- **Antigravity / Claude Compatible Skills**: Drop custom skills into `skills/<name>/SKILL.md` with YAML frontmatter (`name`, `description`). Invoke dynamically via `[skill-name]` or `/skill-name` in email subject/body.
+- **Thread-to-Conversation Persistence**: Maps RFC 5322 thread root IDs to Antigravity conversation IDs in SQLite, giving your agent continuous multi-turn memory across email exchanges.
 - **SQLite FTS5 Email Search**: Indexes inbound and outbound emails for fast personal email search tool calls (`search_past_emails`).
-- **Multimodal Attachment Support**: Extracts and saves inbound attachments (`data/attachments/`), passing images and PDFs directly to Gemini.
-- **Dual Gemini Authentication**: Supports Google AI Studio API keys (`GEMINI_API_KEY`) as well as GCP Vertex AI Service Accounts.
-- **Dynamic Personas**: Select prompt profiles automatically using subject/body tags like `[coder]` or `[writer]`.
+- **Multimodal Attachment Support**: Extracts and saves inbound attachments (`data/attachments/`), passing images and PDFs directly to the AI engine.
 - **Strict Sender Whitelist**: Protects against unauthorized email triggers and token cost.
 - **Self-Loop & Auto-Reply Protection**: Ignores agent's own address and automated bounce messages.
 - **Minimal HTML Formatting**: Converts Markdown output into clean, unbloated email HTML with plain-text fallback.
-- **Distroless Container Ready**: Pure Go SQLite (`modernc.org/sqlite`) enables 100% static, CGO-free binaries running on `gcr.io/distroless/static-debian12:nonroot`.
 
 ## Prerequisites
 
@@ -44,9 +49,13 @@ A personal AI assistant communicating directly through your email client interfa
 - **Gmail Account**:
   - 2-Step Verification enabled.
   - 16-character [Google App Password](https://myaccount.google.com/apppasswords).
-- **Gemini Auth** (choose either):
-  - **Option A**: Google AI Studio API Key (recommended for personal use).
-  - **Option B**: GCP Project with Vertex AI API enabled & Service Account JSON key.
+- **AI Backend** (choose either):
+  - **Option 1: Antigravity CLI (Recommended)**:
+    - Install `agy` on your machine (`agy --help`).
+    - Log in once with your Google account.
+  - **Option 2: Gemini API**:
+    - Google AI Studio API Key (`GEMINI_API_KEY`), OR
+    - GCP Vertex AI Service Account key.
 
 ## Configuration
 
@@ -62,19 +71,16 @@ A personal AI assistant communicating directly through your email client interfa
    GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
    ALLOWED_SENDERS=you@example.com
 
-   # Option A: Google AI Studio (API Key)
-   GEMINI_API_KEY=your-gemini-api-key
+   # AI Backend: "antigravity" (default) or "gemini"
+   AI_BACKEND=antigravity
+   AGY_BIN_PATH=agy
 
-   # Option B: GCP Vertex AI
-   # GCP_PROJECT_ID=your-gcp-project-id
-   # GCP_LOCATION=us-central1
-   # GOOGLE_APPLICATION_CREDENTIALS=credential/service-account.json
+   # Skills directory
+   SKILLS_DIR=skills
 
-   GEMINI_MODEL=gemini-2.5-flash
+   # Storage
    DB_PATH=data/emails.db
    ATTACHMENTS_DIR=data/attachments
-   PERSONAS_DIR=personas
-   ENABLE_GOOGLE_SEARCH=true
    ```
 
 ## Development & Quality Assurance
@@ -117,41 +123,29 @@ make build-linux
 ```bash
 .\email-agent.exe
 ```
-The service connects to Gmail IMAP, logs in, enters the IDLE loop, and awaits inbound messages from whitelisted senders.
 
-## Linux Homeserver & Docker Deployment
+## Homeserver Deployment (Linux)
 
-### 1. Distroless Docker (Recommended)
-The provided `Dockerfile` compiles a static binary (`CGO_ENABLED=0`) and runs in Google's minimal `gcr.io/distroless/static-debian12:nonroot` container for maximum security:
+### 1. Host Deployment with Systemd & Antigravity (Recommended)
+When using `AI_BACKEND=antigravity`, running directly on the host allows the agent to execute `agy` with full access to your logged-in Google credentials and skills:
 
-```bash
-# Build and start in background with auto-restart
-docker compose up -d --build
-
-# View runtime logs
-docker compose logs -f
-
-# Stop container
-docker compose down
-```
-
-**Docker Security Features**:
-- Unprivileged user `nonroot:nonroot` (UID 65532).
-- Root CA certificates included for Gmail TLS and Gemini HTTPS.
-- `no-new-privileges:true` enabled.
-- Persistent storage mapped to host `./data` (`emails.db` and attachments).
-- `restart: always` ensures daemon resumes across server reboots.
-
-### 2. Standalone Linux Binary (Systemd)
-To run directly on a Linux server without Docker:
-
-1. Cross-compile for Linux:
+1. On your Linux homeserver, ensure `agy` CLI is installed and logged in:
+   ```bash
+   agy -p "ping"
+   ```
+2. Cross-compile static binary:
    ```bash
    make build-linux
-   # Or: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-agent ./cmd/email-agent
    ```
-2. Copy `bin/email-agent`, `.env`, `personas/`, and `data/` to your server (e.g. `/opt/email-agent/`).
-3. Create a systemd service `/etc/systemd/system/email-agent.service`:
+3. Deploy files to `/opt/email-agent/`:
+   ```bash
+   sudo mkdir -p /opt/email-agent/data
+   sudo cp bin/email-agent /opt/email-agent/
+   sudo cp -r skills /opt/email-agent/
+   sudo cp .env /opt/email-agent/
+   sudo chown -R $USER:$USER /opt/email-agent
+   ```
+4. Create systemd unit `/etc/systemd/system/email-agent.service`:
    ```ini
    [Unit]
    Description=Email AI Assistant Daemon
@@ -159,17 +153,26 @@ To run directly on a Linux server without Docker:
 
    [Service]
    Type=simple
-   User=emailagent
+   User=your_linux_user
    WorkingDirectory=/opt/email-agent
    ExecStart=/opt/email-agent/email-agent
    Restart=always
    RestartSec=5
+   EnvironmentFile=/opt/email-agent/.env
 
    [Install]
    WantedBy=multi-user.target
    ```
-4. Enable and start:
+5. Start service:
    ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable --now email-agent
+   sudo journalctl -u email-agent -f
    ```
+
+### 2. Distroless Docker Deployment (Gemini Mode)
+For headless `AI_BACKEND=gemini` deployment in a hardened container:
+```bash
+docker compose up -d --build
+docker compose logs -f
+```

@@ -22,8 +22,8 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /bin/email-agent /app/email-agent
 
-# Copy default personas and system prompts
-COPY --from=builder /src/personas /app/personas
+# Copy default skills
+COPY --from=builder /src/skills /app/skills
 
 # Set user to non-root
 USER nonroot:nonroot

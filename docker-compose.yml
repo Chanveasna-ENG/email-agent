@@ -10,9 +10,9 @@ services:
     environment:
       - DB_PATH=/app/data/emails.db
       - ATTACHMENTS_DIR=/app/data/attachments
-      - PERSONAS_DIR=/app/personas
+      - SKILLS_DIR=/app/skills
     volumes:
       - ./data:/app/data
-      - ./personas:/app/personas:ro
+      - ./skills:/app/skills:ro
     security_opt:
       - no-new-privileges:true

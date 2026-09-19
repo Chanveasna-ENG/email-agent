@@ -42,17 +42,28 @@ func TestParseConfig(t *testing.T) {
 	if cfg.AttachmentsDir != "data/attachments" {
 		t.Errorf("AttachmentsDir default = %q, want data/attachments", cfg.AttachmentsDir)
 	}
+	if cfg.AIBackend != "antigravity" {
+		t.Errorf("AIBackend default = %q, want antigravity", cfg.AIBackend)
+	}
+	if cfg.AntigravityBin != "agy" {
+		t.Errorf("AntigravityBin default = %q, want agy", cfg.AntigravityBin)
+	}
+	if cfg.SkillsDir != "skills" {
+		t.Errorf("SkillsDir default = %q, want skills", cfg.SkillsDir)
+	}
 }
 
 func TestParseConfigAPIKeyMode(t *testing.T) {
 	os.Setenv("GMAIL_ADDRESS", "agent@gmail.com")
 	os.Setenv("GMAIL_APP_PASSWORD", "secret123")
+	os.Setenv("AI_BACKEND", "gemini")
 	os.Setenv("GEMINI_API_KEY", "AIzaSyTestKey123")
 	os.Unsetenv("GCP_PROJECT_ID")
 	os.Setenv("ALLOWED_SENDERS", "alice@domain.com")
 	defer func() {
 		os.Unsetenv("GMAIL_ADDRESS")
 		os.Unsetenv("GMAIL_APP_PASSWORD")
+		os.Unsetenv("AI_BACKEND")
 		os.Unsetenv("GEMINI_API_KEY")
 		os.Unsetenv("ALLOWED_SENDERS")
 	}()
@@ -64,6 +75,9 @@ func TestParseConfigAPIKeyMode(t *testing.T) {
 
 	if cfg.GeminiAPIKey != "AIzaSyTestKey123" {
 		t.Errorf("GeminiAPIKey = %q, want AIzaSyTestKey123", cfg.GeminiAPIKey)
+	}
+	if cfg.AIBackend != "gemini" {
+		t.Errorf("AIBackend = %q, want gemini", cfg.AIBackend)
 	}
 }
 
@@ -87,24 +101,49 @@ func TestParseConfigMissingRequired(t *testing.T) {
 	}
 }
 
-func TestParseConfigMissingBothAuth(t *testing.T) {
+func TestParseConfigMissingBothAuthWhenGemini(t *testing.T) {
 	os.Setenv("GMAIL_ADDRESS", "agent@gmail.com")
 	os.Setenv("GMAIL_APP_PASSWORD", "secret123")
+	os.Setenv("AI_BACKEND", "gemini")
 	os.Unsetenv("GEMINI_API_KEY")
 	os.Unsetenv("GCP_PROJECT_ID")
 	os.Setenv("ALLOWED_SENDERS", "user@test.com")
 	defer func() {
 		os.Unsetenv("GMAIL_ADDRESS")
 		os.Unsetenv("GMAIL_APP_PASSWORD")
+		os.Unsetenv("AI_BACKEND")
 		os.Unsetenv("ALLOWED_SENDERS")
 	}()
 
 	_, err := ParseConfig()
 	if err == nil {
-		t.Fatal("ParseConfig expected error when both GEMINI_API_KEY and GCP_PROJECT_ID missing, got nil")
+		t.Fatal("ParseConfig expected error when AI_BACKEND=gemini and both keys missing, got nil")
 	}
 	if !strings.Contains(err.Error(), "either GEMINI_API_KEY or GCP_PROJECT_ID is required") {
 		t.Errorf("expected error message to mention either auth key, got: %v", err)
+	}
+}
+
+func TestParseConfigAntigravityModeWithoutGeminiKeys(t *testing.T) {
+	os.Setenv("GMAIL_ADDRESS", "agent@gmail.com")
+	os.Setenv("GMAIL_APP_PASSWORD", "secret123")
+	os.Setenv("AI_BACKEND", "antigravity")
+	os.Unsetenv("GEMINI_API_KEY")
+	os.Unsetenv("GCP_PROJECT_ID")
+	os.Setenv("ALLOWED_SENDERS", "user@test.com")
+	defer func() {
+		os.Unsetenv("GMAIL_ADDRESS")
+		os.Unsetenv("GMAIL_APP_PASSWORD")
+		os.Unsetenv("AI_BACKEND")
+		os.Unsetenv("ALLOWED_SENDERS")
+	}()
+
+	cfg, err := ParseConfig()
+	if err != nil {
+		t.Fatalf("ParseConfig in antigravity mode should not require Gemini keys, got error: %v", err)
+	}
+	if cfg.AIBackend != "antigravity" {
+		t.Errorf("AIBackend = %q, want antigravity", cfg.AIBackend)
 	}
 }
 

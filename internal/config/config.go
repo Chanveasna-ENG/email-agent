@@ -15,6 +15,9 @@ type Config struct {
 	GmailAddress       string
 	GmailAppPassword   string
 	AllowedSenders     []string
+	AIBackend          string
+	AntigravityBin     string
+	SkillsDir          string
 	GeminiAPIKey       string
 	GCPProjectID       string
 	GCPLocation        string
@@ -39,16 +42,31 @@ func LoadConfig() (*Config, error) {
 func ParseConfig() (*Config, error) {
 	gmailAddress := strings.TrimSpace(os.Getenv("GMAIL_ADDRESS"))
 	gmailPassword := strings.TrimSpace(os.Getenv("GMAIL_APP_PASSWORD"))
+	rawSenders := strings.TrimSpace(os.Getenv("ALLOWED_SENDERS"))
+	aiBackend := strings.ToLower(strings.TrimSpace(os.Getenv("AI_BACKEND")))
+	if aiBackend == "" {
+		aiBackend = "antigravity"
+	}
+	agyBin := strings.TrimSpace(os.Getenv("AGY_BIN_PATH"))
+	if agyBin == "" {
+		agyBin = "agy"
+	}
+	skillsDir := strings.TrimSpace(os.Getenv("SKILLS_DIR"))
+	if skillsDir == "" {
+		skillsDir = strings.TrimSpace(os.Getenv("PERSONAS_DIR"))
+		if skillsDir == "" {
+			skillsDir = "skills"
+		}
+	}
+
 	geminiAPIKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
 	gcpProjectID := strings.TrimSpace(os.Getenv("GCP_PROJECT_ID"))
 	gcpLocation := strings.TrimSpace(os.Getenv("GCP_LOCATION"))
 	geminiModel := strings.TrimSpace(os.Getenv("GEMINI_MODEL"))
 	credsPath := strings.TrimSpace(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
 	promptPath := strings.TrimSpace(os.Getenv("SYSTEM_PROMPT_FILE"))
-	rawSenders := strings.TrimSpace(os.Getenv("ALLOWED_SENDERS"))
 	dbPath := strings.TrimSpace(os.Getenv("DB_PATH"))
 	attachmentsDir := strings.TrimSpace(os.Getenv("ATTACHMENTS_DIR"))
-	personasDir := strings.TrimSpace(os.Getenv("PERSONAS_DIR"))
 
 	if gmailAddress == "" {
 		return nil, fmt.Errorf("GMAIL_ADDRESS is required")
@@ -59,8 +77,8 @@ func ParseConfig() (*Config, error) {
 	if rawSenders == "" {
 		return nil, fmt.Errorf("ALLOWED_SENDERS is required (comma-separated email list)")
 	}
-	if geminiAPIKey == "" && gcpProjectID == "" {
-		return nil, fmt.Errorf("either GEMINI_API_KEY or GCP_PROJECT_ID is required")
+	if aiBackend == "gemini" && geminiAPIKey == "" && gcpProjectID == "" {
+		return nil, fmt.Errorf("either GEMINI_API_KEY or GCP_PROJECT_ID is required when AI_BACKEND=gemini")
 	}
 
 	if gcpLocation == "" {
@@ -70,9 +88,12 @@ func ParseConfig() (*Config, error) {
 		geminiModel = "gemini-2.5-flash"
 	}
 	if promptPath == "" {
-		promptPath = "config/system_prompt.txt"
+		promptPath = "skills/default/SKILL.md"
 		if _, err := os.Stat(promptPath); os.IsNotExist(err) {
-			promptPath = "personas/default.txt"
+			promptPath = "config/system_prompt.txt"
+			if _, err := os.Stat(promptPath); os.IsNotExist(err) {
+				promptPath = "personas/default.txt"
+			}
 		}
 	}
 	if dbPath == "" {
@@ -80,9 +101,6 @@ func ParseConfig() (*Config, error) {
 	}
 	if attachmentsDir == "" {
 		attachmentsDir = "data/attachments"
-	}
-	if personasDir == "" {
-		personasDir = "personas"
 	}
 
 	enableGoogleSearch := true
@@ -116,6 +134,9 @@ func ParseConfig() (*Config, error) {
 		GmailAddress:       gmailAddress,
 		GmailAppPassword:   gmailPassword,
 		AllowedSenders:     allowedSenders,
+		AIBackend:          aiBackend,
+		AntigravityBin:     agyBin,
+		SkillsDir:          skillsDir,
 		GeminiAPIKey:       geminiAPIKey,
 		GCPProjectID:       gcpProjectID,
 		GCPLocation:        gcpLocation,
@@ -124,7 +145,7 @@ func ParseConfig() (*Config, error) {
 		SystemPromptPath:   promptPath,
 		DBPath:             dbPath,
 		AttachmentsDir:     attachmentsDir,
-		PersonasDir:        personasDir,
+		PersonasDir:        skillsDir,
 		EnableGoogleSearch: enableGoogleSearch,
 		IdleTimeout:        idleTimeout,
 		PollInterval:       pollInterval,

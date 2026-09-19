@@ -82,3 +82,49 @@ func TestEmailDBSaveAndSearch(t *testing.T) {
 		t.Fatalf("expected 0 results for astronaut, got %d", len(noneResults))
 	}
 }
+
+func TestThreadConversations(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_convs.db")
+
+	emailDB, err := NewEmailDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewEmailDB failed: %v", err)
+	}
+	defer emailDB.Close()
+
+	// 1. Check non-existent thread
+	convID, err := emailDB.GetConversationID("<non_existent@mail>")
+	if err != nil {
+		t.Fatalf("GetConversationID failed: %v", err)
+	}
+	if convID != "" {
+		t.Fatalf("expected empty string for non-existent thread, got %q", convID)
+	}
+
+	// 2. Save new conversation
+	if err := emailDB.SaveConversationID("<root123@mail>", "conv-uuid-1"); err != nil {
+		t.Fatalf("SaveConversationID failed: %v", err)
+	}
+
+	fetched, err := emailDB.GetConversationID("<root123@mail>")
+	if err != nil {
+		t.Fatalf("GetConversationID failed: %v", err)
+	}
+	if fetched != "conv-uuid-1" {
+		t.Fatalf("expected conv-uuid-1, got %q", fetched)
+	}
+
+	// 3. Upsert existing thread
+	if err := emailDB.SaveConversationID("<root123@mail>", "conv-uuid-2"); err != nil {
+		t.Fatalf("SaveConversationID update failed: %v", err)
+	}
+
+	updated, err := emailDB.GetConversationID("<root123@mail>")
+	if err != nil {
+		t.Fatalf("GetConversationID failed: %v", err)
+	}
+	if updated != "conv-uuid-2" {
+		t.Fatalf("expected updated conv-uuid-2, got %q", updated)
+	}
+}

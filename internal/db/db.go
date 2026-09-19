@@ -62,6 +62,12 @@ func NewEmailDB(dbPath string) (*EmailDB, error) {
 		subject,
 		body_text
 	);
+
+	CREATE TABLE IF NOT EXISTS thread_conversations (
+		thread_id TEXT PRIMARY KEY,
+		conversation_id TEXT NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -201,6 +207,46 @@ func (e *EmailDB) SearchEmails(query string, limit int) ([]*models.EmailMessage,
 	}
 
 	return results, nil
+}
+
+// GetConversationID returns the mapped Antigravity conversation ID for a given thread root.
+func (e *EmailDB) GetConversationID(threadID string) (string, error) {
+	cleanID := strings.TrimSpace(threadID)
+	if cleanID == "" {
+		return "", nil
+	}
+
+	row := e.db.QueryRow("SELECT conversation_id FROM thread_conversations WHERE thread_id = ?", cleanID)
+	var convID string
+	if err := row.Scan(&convID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("query conversation_id: %w", err)
+	}
+	return convID, nil
+}
+
+// SaveConversationID stores or updates the Antigravity conversation ID for an email thread.
+func (e *EmailDB) SaveConversationID(threadID, conversationID string) error {
+	cleanThread := strings.TrimSpace(threadID)
+	cleanConv := strings.TrimSpace(conversationID)
+	if cleanThread == "" || cleanConv == "" {
+		return nil
+	}
+
+	query := `
+	INSERT INTO thread_conversations (thread_id, conversation_id, updated_at)
+	VALUES (?, ?, ?)
+	ON CONFLICT(thread_id) DO UPDATE SET
+		conversation_id = excluded.conversation_id,
+		updated_at = excluded.updated_at;
+	`
+	_, err := e.db.Exec(query, cleanThread, cleanConv, time.Now())
+	if err != nil {
+		return fmt.Errorf("save conversation_id: %w", err)
+	}
+	return nil
 }
 
 // Close closes the underlying SQLite database connection.
