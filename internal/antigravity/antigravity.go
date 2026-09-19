@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -69,6 +70,34 @@ func (r *Runner) WithBlockedEnvs(blocked []string) *Runner {
 	return r
 }
 
+// ResolveBinPath finds the executable path for agy, checking common locations if not in PATH.
+func ResolveBinPath(binPath string) string {
+	cleanPath := strings.TrimSpace(binPath)
+	if cleanPath == "" {
+		cleanPath = "agy"
+	}
+	if p, err := exec.LookPath(cleanPath); err == nil {
+		return p
+	}
+
+	// Candidate fallback paths if running in a restricted PATH environment (like systemd)
+	candidates := []string{
+		"/usr/local/bin/agy",
+		"/usr/bin/agy",
+		"/home/emailagent/.local/bin/agy",
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", "agy"))
+	}
+
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return cleanPath
+}
+
 // BuildArgs constructs CLI arguments for agy execution.
 func (r *Runner) BuildArgs(conversationID, prompt string) []string {
 	var args []string
@@ -84,8 +113,9 @@ func (r *Runner) BuildArgs(conversationID, prompt string) []string {
 func (r *Runner) Execute(ctx context.Context, conversationID, prompt string) (string, error) {
 	args := r.BuildArgs(conversationID, prompt)
 	cleanEnv := SanitizeEnv(os.Environ(), r.blockedEnvs)
+	targetBin := ResolveBinPath(r.binPath)
 
-	out, err := r.executor(ctx, r.workspaceDir, cleanEnv, r.binPath, args...)
+	out, err := r.executor(ctx, r.workspaceDir, cleanEnv, targetBin, args...)
 	if err != nil {
 		return "", fmt.Errorf("agy execution failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
@@ -98,7 +128,7 @@ func (r *Runner) Execute(ctx context.Context, conversationID, prompt string) (st
 	return cleanOutput, nil
 }
 
-// SanitizeEnv strips blocked sensitive variables from an environment list.
+// SanitizeEnv strips blocked sensitive variables from an environment list and guarantees a healthy PATH.
 func SanitizeEnv(environ []string, blocklist []string) []string {
 	blockedMap := make(map[string]bool)
 	for _, b := range blocklist {
@@ -106,6 +136,8 @@ func SanitizeEnv(environ []string, blocklist []string) []string {
 	}
 
 	var result []string
+	hasPath := false
+
 	for _, env := range environ {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) > 0 {
@@ -113,9 +145,22 @@ func SanitizeEnv(environ []string, blocklist []string) []string {
 			if blockedMap[key] {
 				continue
 			}
+			if key == "PATH" {
+				hasPath = true
+				val := parts[1]
+				if !strings.Contains(val, "/usr/local/bin") {
+					val = val + ":/usr/local/bin"
+				}
+				env = parts[0] + "=" + val
+			}
 		}
 		result = append(result, env)
 	}
+
+	if !hasPath {
+		result = append(result, "PATH=/usr/local/bin:/usr/bin:/bin")
+	}
+
 	return result
 }
 

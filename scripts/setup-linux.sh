@@ -19,14 +19,46 @@ for cmd in curl python3; do
   fi
 done
 
-# 2. Check Antigravity CLI and ensure system-wide symlink
-if ! command -v agy >/dev/null 2>&1; then
+# 2. Check Antigravity CLI and ensure system-wide copy in /usr/local/bin
+AGY_FOUND=""
+for candidate in \
+  "/usr/local/bin/agy" \
+  "/usr/bin/agy" \
+  "${REAL_HOME}/.local/bin/agy" \
+  "${REAL_HOME}/.antigravity/bin/agy" \
+  "${REAL_HOME}/.gemini/bin/agy" \
+  "${REAL_HOME}/bin/agy"; do
+  if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+    AGY_FOUND="$candidate"
+    break
+  fi
+done
+
+if [ -z "$AGY_FOUND" ] && [ -n "${REAL_USER:-}" ]; then
+  USER_BIN=$(su - "${REAL_USER}" -c "command -v agy" 2>/dev/null || true)
+  if [ -n "$USER_BIN" ] && [ -x "$USER_BIN" ]; then
+    AGY_FOUND="$USER_BIN"
+  fi
+fi
+
+if [ -n "$AGY_FOUND" ]; then
+  echo "==> Found 'agy' binary at: ${AGY_FOUND}"
+  if [ "$AGY_FOUND" != "/usr/local/bin/agy" ]; then
+    echo "==> Copying to /usr/local/bin/agy (safe for systemd ProtectHome sandbox)..."
+    cp -p "$AGY_FOUND" /usr/local/bin/agy
+    chmod 0755 /usr/local/bin/agy
+  fi
+else
+  echo "[WARN] 'agy' CLI not found. Attempting install for ${REAL_USER}..."
+  su - "${REAL_USER}" -c "curl -fsSL https://antigravity.google/cli/install.sh | bash" || true
   if [ -f "${REAL_HOME}/.local/bin/agy" ]; then
-    echo "==> Found 'agy' in ${REAL_HOME}/.local/bin/agy. Creating system symlink in /usr/local/bin/agy..."
-    ln -sf "${REAL_HOME}/.local/bin/agy" /usr/local/bin/agy
+    cp -p "${REAL_HOME}/.local/bin/agy" /usr/local/bin/agy
+    chmod 0755 /usr/local/bin/agy
+    echo "==> Installed agy to /usr/local/bin/agy successfully."
   else
-    echo "[WARN] 'agy' CLI not found in PATH or ~/.local/bin."
-    echo "       Install for ${REAL_USER}: curl -fsSL https://antigravity.google/cli/install.sh | bash"
+    echo "[WARN] Could not auto-install 'agy'. Ensure it is installed via:"
+    echo "       curl -fsSL https://antigravity.google/cli/install.sh | bash"
+    echo "       sudo cp ~/.local/bin/agy /usr/local/bin/agy"
   fi
 fi
 
@@ -62,13 +94,15 @@ else
 fi
 
 # 5. Sync Antigravity auth credentials from the invoking user to emailagent
-if [ -d "${REAL_HOME}/.gemini" ]; then
-  echo "==> Syncing Antigravity CLI credentials from ${REAL_USER} to emailagent..."
-  mkdir -p /home/emailagent/.gemini
-  cp -r "${REAL_HOME}/.gemini/." /home/emailagent/.gemini/
-  chown -R emailagent:emailagent /home/emailagent/.gemini
-  chmod 0700 /home/emailagent/.gemini
-fi
+for cred_dir in ".gemini" ".config/antigravity" ".config/agy" ".antigravity"; do
+  if [ -d "${REAL_HOME}/${cred_dir}" ]; then
+    echo "==> Syncing ${cred_dir} credentials from ${REAL_USER} to emailagent..."
+    mkdir -p "/home/emailagent/${cred_dir}"
+    cp -r "${REAL_HOME}/${cred_dir}/." "/home/emailagent/${cred_dir}/"
+    chown -R emailagent:emailagent "/home/emailagent/${cred_dir}"
+    chmod -R 0700 "/home/emailagent/${cred_dir}"
+  fi
+done
 
 # 6. Provision directories
 echo "==> Provisioning directories in /opt/email-agent and /etc/email-agent..."
@@ -119,6 +153,7 @@ ExecStart=/opt/email-agent/email-agent
 Restart=always
 RestartSec=5
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="AGY_BIN_PATH=/usr/local/bin/agy"
 EnvironmentFile=/etc/email-agent/.env
 
 # Linux namespace hardening & sandboxing

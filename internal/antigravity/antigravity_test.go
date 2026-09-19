@@ -47,8 +47,9 @@ func TestExecuteSuccess(t *testing.T) {
 		t.Fatalf("Execute returned unexpected error: %v", err)
 	}
 
-	if executedName != "agy" {
-		t.Errorf("executedName = %q, want agy", executedName)
+	expectedBin := ResolveBinPath("agy")
+	if executedName != expectedBin {
+		t.Errorf("executedName = %q, want %q", executedName, expectedBin)
 	}
 	if executedDir != "/tmp/test-workspace" {
 		t.Errorf("executedDir = %q, want /tmp/test-workspace", executedDir)
@@ -119,3 +120,18 @@ func TestCleanOutput(t *testing.T) {
 		t.Errorf("CleanOutput = %q, want %q", cleaned, expected)
 	}
 }
+
+func TestResolveBinPath(t *testing.T) {
+	// 1. Empty defaults to agy
+	p1 := ResolveBinPath("")
+	if p1 == "" {
+		t.Error("expected non-empty binary path")
+	}
+
+	// 2. Explicit path preserved if provided
+	p2 := ResolveBinPath("/custom/path/to/agy")
+	if p2 != "/custom/path/to/agy" {
+		t.Errorf("expected explicit path preserved, got %q", p2)
+	}
+}
+
