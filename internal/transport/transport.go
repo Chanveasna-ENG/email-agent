@@ -189,7 +189,9 @@ func (t *EmailTransport) FetchByMessageID(ctx context.Context, messageID string)
 
 // fetchMessageByUID retrieves message body and headers for a given UID.
 func (t *EmailTransport) fetchMessageByUID(client *imapclient.Client, uid imap.UID) (*models.EmailMessage, error) {
-	bodySection := &imap.FetchItemBodySection{}
+	bodySection := &imap.FetchItemBodySection{
+		Peek: true,
+	}
 	fetchOpts := &imap.FetchOptions{
 		UID:         true,
 		BodySection: []*imap.FetchItemBodySection{bodySection},
