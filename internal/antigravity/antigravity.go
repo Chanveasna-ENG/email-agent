@@ -3,20 +3,31 @@ package antigravity
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 )
 
-var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+var (
+	ansiRegex          = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	DefaultBlockedEnvs = []string{
+		"GMAIL_APP_PASSWORD",
+		"GEMINI_API_KEY",
+		"GOOGLE_APPLICATION_CREDENTIALS",
+		"GCP_PROJECT_ID",
+	}
+)
 
-// CommandExecutor abstracts command execution for testability.
-type CommandExecutor func(ctx context.Context, name string, args ...string) ([]byte, error)
+// CommandExecutor abstracts command execution with working directory and environment.
+type CommandExecutor func(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error)
 
 // Runner manages execution of the Antigravity CLI (agy) in non-interactive print mode.
 type Runner struct {
-	binPath  string
-	executor CommandExecutor
+	binPath      string
+	workspaceDir string
+	blockedEnvs  []string
+	executor     CommandExecutor
 }
 
 // NewRunner creates a new Antigravity CLI runner.
@@ -25,17 +36,36 @@ func NewRunner(binPath string) *Runner {
 		binPath = "agy"
 	}
 	return &Runner{
-		binPath: binPath,
-		executor: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		binPath:     binPath,
+		blockedEnvs: DefaultBlockedEnvs,
+		executor: func(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
 			cmd := exec.CommandContext(ctx, name, args...)
+			if dir != "" {
+				cmd.Dir = dir
+			}
+			if len(env) > 0 {
+				cmd.Env = env
+			}
 			return cmd.CombinedOutput()
 		},
 	}
 }
 
+// WithWorkspace sets the working directory for agy execution.
+func (r *Runner) WithWorkspace(dir string) *Runner {
+	r.workspaceDir = dir
+	return r
+}
+
 // WithExecutor overrides the executor (primarily for testing).
 func (r *Runner) WithExecutor(executor CommandExecutor) *Runner {
 	r.executor = executor
+	return r
+}
+
+// WithBlockedEnvs overrides the list of sensitive environment variables to strip.
+func (r *Runner) WithBlockedEnvs(blocked []string) *Runner {
+	r.blockedEnvs = blocked
 	return r
 }
 
@@ -53,7 +83,9 @@ func (r *Runner) BuildArgs(conversationID, prompt string) []string {
 // Execute runs the prompt against agy and returns the generated text.
 func (r *Runner) Execute(ctx context.Context, conversationID, prompt string) (string, error) {
 	args := r.BuildArgs(conversationID, prompt)
-	out, err := r.executor(ctx, r.binPath, args...)
+	cleanEnv := SanitizeEnv(os.Environ(), r.blockedEnvs)
+
+	out, err := r.executor(ctx, r.workspaceDir, cleanEnv, r.binPath, args...)
 	if err != nil {
 		return "", fmt.Errorf("agy execution failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
@@ -64,6 +96,27 @@ func (r *Runner) Execute(ctx context.Context, conversationID, prompt string) (st
 	}
 
 	return cleanOutput, nil
+}
+
+// SanitizeEnv strips blocked sensitive variables from an environment list.
+func SanitizeEnv(environ []string, blocklist []string) []string {
+	blockedMap := make(map[string]bool)
+	for _, b := range blocklist {
+		blockedMap[strings.ToUpper(strings.TrimSpace(b))] = true
+	}
+
+	var result []string
+	for _, env := range environ {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) > 0 {
+			key := strings.ToUpper(strings.TrimSpace(parts[0]))
+			if blockedMap[key] {
+				continue
+			}
+		}
+		result = append(result, env)
+	}
+	return result
 }
 
 // CleanOutput strips ANSI escape codes and normalizes whitespace.

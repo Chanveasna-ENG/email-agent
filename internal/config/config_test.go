@@ -51,6 +51,9 @@ func TestParseConfig(t *testing.T) {
 	if cfg.SkillsDir != "skills" {
 		t.Errorf("SkillsDir default = %q, want skills", cfg.SkillsDir)
 	}
+	if cfg.WorkspaceDir != "workspace" {
+		t.Errorf("WorkspaceDir default = %q, want workspace", cfg.WorkspaceDir)
+	}
 }
 
 func TestParseConfigAPIKeyMode(t *testing.T) {

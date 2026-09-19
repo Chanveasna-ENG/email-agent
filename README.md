@@ -126,49 +126,34 @@ make build-linux
 
 ## Homeserver Deployment (Linux)
 
-### 1. Host Deployment with Systemd & Antigravity (Recommended)
-When using `AI_BACKEND=antigravity`, running directly on the host allows the agent to execute `agy` with full access to your logged-in Google credentials and skills:
+### 1. Automated Host Setup with Sandboxing (Recommended)
+The automated script creates a dedicated unprivileged user `emailagent`, isolates the scratch `workspace/`, strips secrets from `agy`'s memory, shields `.env` in `/etc/email-agent/`, and configures hardened systemd namespace security:
 
-1. On your Linux homeserver, ensure `agy` CLI is installed and logged in:
-   ```bash
-   agy -p "ping"
-   ```
-2. Cross-compile static binary:
+1. Cross-compile static Linux binary on your machine (or let the script build it):
    ```bash
    make build-linux
    ```
-3. Deploy files to `/opt/email-agent/`:
+2. Copy project folder to your Linux homeserver.
+3. Run the setup script with `sudo`:
    ```bash
-   sudo mkdir -p /opt/email-agent/data
-   sudo cp bin/email-agent /opt/email-agent/
-   sudo cp -r skills /opt/email-agent/
-   sudo cp .env /opt/email-agent/
-   sudo chown -R $USER:$USER /opt/email-agent
+   sudo bash scripts/setup-linux.sh
    ```
-4. Create systemd unit `/etc/systemd/system/email-agent.service`:
-   ```ini
-   [Unit]
-   Description=Email AI Assistant Daemon
-   After=network.target
-
-   [Service]
-   Type=simple
-   User=your_linux_user
-   WorkingDirectory=/opt/email-agent
-   ExecStart=/opt/email-agent/email-agent
-   Restart=always
-   RestartSec=5
-   EnvironmentFile=/opt/email-agent/.env
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
-5. Start service:
+4. Verify your credentials in `/etc/email-agent/.env` (chmod `0640`, unreadable by the agent's web browsing scripts):
    ```bash
-   sudo systemctl daemon-reload
+   sudo nano /etc/email-agent/.env
+   ```
+5. Start and enable the service:
+   ```bash
    sudo systemctl enable --now email-agent
    sudo journalctl -u email-agent -f
    ```
+
+**Security & Sandboxing Architecture**:
+- **Process Memory Isolation**: The Go daemon sanitizes `cmd.Env` before spawning `agy`, stripping `GMAIL_APP_PASSWORD` and API tokens. Python scripts executed by `agy` cannot inspect the process environment for secrets.
+- **Dedicated Workspace**: `agy` executes strictly in `/opt/email-agent/workspace`. `.env` lives outside in `/etc/email-agent/` with root-restricted permissions. `cat .env` by prompt injection fails.
+- **Unprivileged Execution**: Daemon runs as `emailagent` without `sudo` access. Packages are installed strictly in user space (`pip install --user`, `playwright install chromium` inside `/home/emailagent`).
+- **Linux Namespace Hardening**: Systemd applies `ProtectSystem=strict` (read-only `/usr`, `/etc`), `ProtectHome=true` (hides user homes and SSH keys), `PrivateTmp=true`, and `NoNewPrivileges=true`.
+
 
 ### 2. Distroless Docker Deployment (Gemini Mode)
 For headless `AI_BACKEND=gemini` deployment in a hardened container:

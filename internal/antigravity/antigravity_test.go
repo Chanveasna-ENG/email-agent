@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -27,16 +28,20 @@ func TestBuildArgs(t *testing.T) {
 
 func TestExecuteSuccess(t *testing.T) {
 	ctx := context.Background()
+	var executedDir string
 	var executedName string
 	var executedArgs []string
+	var executedEnv []string
 
-	mockExecutor := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	mockExecutor := func(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
+		executedDir = dir
+		executedEnv = env
 		executedName = name
 		executedArgs = args
 		return []byte("\x1b[32mHere is the solution to your query.\x1b[0m\n"), nil
 	}
 
-	runner := NewRunner("agy").WithExecutor(mockExecutor)
+	runner := NewRunner("agy").WithWorkspace("/tmp/test-workspace").WithExecutor(mockExecutor)
 	result, err := runner.Execute(ctx, "conv-1", "Fix the bug")
 	if err != nil {
 		t.Fatalf("Execute returned unexpected error: %v", err)
@@ -45,17 +50,25 @@ func TestExecuteSuccess(t *testing.T) {
 	if executedName != "agy" {
 		t.Errorf("executedName = %q, want agy", executedName)
 	}
+	if executedDir != "/tmp/test-workspace" {
+		t.Errorf("executedDir = %q, want /tmp/test-workspace", executedDir)
+	}
 	if len(executedArgs) != 5 || executedArgs[1] != "conv-1" {
 		t.Errorf("executedArgs = %v", executedArgs)
 	}
 	if result != "Here is the solution to your query." {
 		t.Errorf("CleanOutput result = %q, want stripped ANSI text", result)
 	}
+
+	// Verify env is populated
+	if len(executedEnv) == 0 {
+		t.Errorf("expected executedEnv to be populated with host environment")
+	}
 }
 
 func TestExecuteError(t *testing.T) {
 	ctx := context.Background()
-	mockExecutor := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	mockExecutor := func(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
 		return []byte("fatal: auth failed"), errors.New("exit status 1")
 	}
 
@@ -63,6 +76,38 @@ func TestExecuteError(t *testing.T) {
 	_, err := runner.Execute(ctx, "", "Do something")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestSanitizeEnv(t *testing.T) {
+	environ := []string{
+		"PATH=/usr/bin:/bin",
+		"GMAIL_APP_PASSWORD=supersecret",
+		"gmail_address=bot@gmail.com",
+		"GEMINI_API_KEY=AIzaSyKey123",
+		"USER=emailagent",
+		"HOME=/home/emailagent",
+	}
+
+	blocklist := []string{
+		"GMAIL_APP_PASSWORD",
+		"GEMINI_API_KEY",
+	}
+
+	cleaned := SanitizeEnv(environ, blocklist)
+
+	for _, entry := range cleaned {
+		if strings.HasPrefix(entry, "GMAIL_APP_PASSWORD=") {
+			t.Errorf("GMAIL_APP_PASSWORD was not stripped: %s", entry)
+		}
+		if strings.HasPrefix(entry, "GEMINI_API_KEY=") {
+			t.Errorf("GEMINI_API_KEY was not stripped: %s", entry)
+		}
+	}
+
+	expectedCount := len(environ) - 2
+	if len(cleaned) != expectedCount {
+		t.Errorf("len(cleaned) = %d, want %d", len(cleaned), expectedCount)
 	}
 }
 

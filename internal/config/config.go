@@ -18,6 +18,7 @@ type Config struct {
 	AIBackend          string
 	AntigravityBin     string
 	SkillsDir          string
+	WorkspaceDir       string
 	GeminiAPIKey       string
 	GCPProjectID       string
 	GCPLocation        string
@@ -57,6 +58,10 @@ func ParseConfig() (*Config, error) {
 		if skillsDir == "" {
 			skillsDir = "skills"
 		}
+	}
+	workspaceDir := strings.TrimSpace(os.Getenv("AGY_WORKSPACE_DIR"))
+	if workspaceDir == "" {
+		workspaceDir = "workspace"
 	}
 
 	geminiAPIKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
@@ -137,6 +142,7 @@ func ParseConfig() (*Config, error) {
 		AIBackend:          aiBackend,
 		AntigravityBin:     agyBin,
 		SkillsDir:          skillsDir,
+		WorkspaceDir:       workspaceDir,
 		GeminiAPIKey:       geminiAPIKey,
 		GCPProjectID:       gcpProjectID,
 		GCPLocation:        gcpLocation,

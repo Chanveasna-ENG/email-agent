@@ -40,6 +40,11 @@ func main() {
 			log.Printf("[WARN] Could not create attachments directory %s: %v", cfg.AttachmentsDir, err)
 		}
 	}
+	if cfg.WorkspaceDir != "" {
+		if err := os.MkdirAll(cfg.WorkspaceDir, 0755); err != nil {
+			log.Printf("[WARN] Could not create workspace directory %s: %v", cfg.WorkspaceDir, err)
+		}
+	}
 
 	systemPrompt := ""
 	if promptBytes, err := os.ReadFile(cfg.SystemPromptPath); err == nil {
@@ -64,8 +69,8 @@ func main() {
 	var agyRunner *antigravity.Runner
 
 	if cfg.AIBackend == "antigravity" {
-		agyRunner = antigravity.NewRunner(cfg.AntigravityBin)
-		log.Printf("[INFO] AI backend: Antigravity CLI (%s) with Pro subscription", cfg.AntigravityBin)
+		agyRunner = antigravity.NewRunner(cfg.AntigravityBin).WithWorkspace(cfg.WorkspaceDir)
+		log.Printf("[INFO] AI backend: Antigravity CLI (%s) in workspace %s with Pro subscription", cfg.AntigravityBin, cfg.WorkspaceDir)
 	} else {
 		var err error
 		geminiClient, err = gemini.NewGeminiClient(ctx, cfg, systemPrompt)

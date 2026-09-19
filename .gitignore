@@ -6,6 +6,7 @@ credential/
 *.db
 attachments/
 data/
+workspace/
 
 # Binaries and build outputs
 *.exe
