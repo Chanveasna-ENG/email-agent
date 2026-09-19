@@ -13,14 +13,14 @@ func TestBuildArgs(t *testing.T) {
 
 	// 1. Without conversation ID
 	args1 := runner.BuildArgs("", "Hello world")
-	expected1 := []string{"--dangerously-skip-permissions", "-p", "Hello world"}
+	expected1 := []string{"--dangerously-skip-permissions", "--output-format", "json", "-p", "Hello world"}
 	if !reflect.DeepEqual(args1, expected1) {
 		t.Errorf("BuildArgs without conversation = %v, want %v", args1, expected1)
 	}
 
 	// 2. With conversation ID
 	args2 := runner.BuildArgs("thread-abc-123", "Continue task")
-	expected2 := []string{"--conversation", "thread-abc-123", "--dangerously-skip-permissions", "-p", "Continue task"}
+	expected2 := []string{"--conversation", "thread-abc-123", "--dangerously-skip-permissions", "--output-format", "json", "-p", "Continue task"}
 	if !reflect.DeepEqual(args2, expected2) {
 		t.Errorf("BuildArgs with conversation = %v, want %v", args2, expected2)
 	}
@@ -38,7 +38,7 @@ func TestExecuteSuccess(t *testing.T) {
 		executedEnv = env
 		executedName = name
 		executedArgs = args
-		return []byte("\x1b[32mHere is the solution to your query.\x1b[0m\n"), nil
+		return []byte("{\"conversation_id\":\"conv-123\",\"status\":\"SUCCESS\",\"response\":\"Here is the solution to your query.\"}"), nil
 	}
 
 	runner := NewRunner("agy").WithWorkspace("/tmp/test-workspace").WithExecutor(mockExecutor)
@@ -54,11 +54,14 @@ func TestExecuteSuccess(t *testing.T) {
 	if executedDir != "/tmp/test-workspace" {
 		t.Errorf("executedDir = %q, want /tmp/test-workspace", executedDir)
 	}
-	if len(executedArgs) != 5 || executedArgs[1] != "conv-1" {
+	if len(executedArgs) != 7 || executedArgs[1] != "conv-1" {
 		t.Errorf("executedArgs = %v", executedArgs)
 	}
-	if result != "Here is the solution to your query." {
-		t.Errorf("CleanOutput result = %q, want stripped ANSI text", result)
+	if result.Response != "Here is the solution to your query." {
+		t.Errorf("CleanOutput result = %q, want stripped text", result.Response)
+	}
+	if result.ConversationID != "conv-123" {
+		t.Errorf("ConversationID = %q, want conv-123", result.ConversationID)
 	}
 
 	// Verify env is populated

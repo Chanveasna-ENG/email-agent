@@ -157,14 +157,6 @@ func main() {
 				if err != nil {
 					log.Printf("[WARN] Failed getting conversation ID: %v", err)
 				}
-				if convID == "" {
-					cleanID := strings.Trim(rootThreadID, "<>")
-					cleanID = strings.ReplaceAll(cleanID, "@", "_")
-					cleanID = strings.ReplaceAll(cleanID, ".", "_")
-					cleanID = strings.ReplaceAll(cleanID, "/", "_")
-					convID = fmt.Sprintf("mail_%s", cleanID)
-					_ = emailDB.SaveConversationID(rootThreadID, convID)
-				}
 
 				var promptBuilder strings.Builder
 				promptBuilder.WriteString(fmt.Sprintf("Inbound email from: %s\nSubject: %s\nDate: %s\n",
@@ -180,11 +172,21 @@ func main() {
 				}
 				promptBuilder.WriteString(fmt.Sprintf("\nEmail Content:\n%s\n\nPlease write a concise, professional reply to the sender.", msg.BodyText))
 
-				log.Printf("[INFO] Dispatching to Antigravity CLI (conversation=%s)...", convID)
-				replyMarkdown, err = agyRunner.Execute(ctx, convID, promptBuilder.String())
+				if convID != "" {
+					log.Printf("[INFO] Dispatching to Antigravity CLI (resuming conversation=%s)...", convID)
+				} else {
+					log.Printf("[INFO] Dispatching to Antigravity CLI (new conversation for thread %s)...", rootThreadID)
+				}
+
+				execRes, err := agyRunner.Execute(ctx, convID, promptBuilder.String())
 				if err != nil {
 					log.Printf("[ERROR] Antigravity execution failed for UID=%d: %v", msg.UID, err)
 					continue
+				}
+				replyMarkdown = execRes.Response
+				if execRes.ConversationID != "" && execRes.ConversationID != convID {
+					_ = emailDB.SaveConversationID(rootThreadID, execRes.ConversationID)
+					log.Printf("[INFO] Linked thread %s to Antigravity conversation %s", rootThreadID, execRes.ConversationID)
 				}
 			} else {
 				activeGemini := geminiClient.WithSystemPrompt(activePrompt)
