@@ -1,10 +1,12 @@
-package main
+package transport
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"email-agent/internal/models"
 )
 
 func TestBuildMimeMessage(t *testing.T) {
@@ -61,7 +63,7 @@ func TestSliceContains(t *testing.T) {
 func TestSaveAttachmentsToDisk(t *testing.T) {
 	tempDir := t.TempDir()
 	messageID := "<test123@domain.com>"
-	attachments := []Attachment{
+	attachments := []models.Attachment{
 		{
 			Filename:    "report.pdf",
 			ContentType: "application/pdf",

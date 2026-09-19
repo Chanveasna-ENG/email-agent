@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -20,9 +20,9 @@ func TestParseConfig(t *testing.T) {
 		os.Unsetenv("ALLOWED_SENDERS")
 	}()
 
-	cfg, err := parseConfig()
+	cfg, err := ParseConfig()
 	if err != nil {
-		t.Fatalf("parseConfig returned unexpected error: %v", err)
+		t.Fatalf("ParseConfig returned unexpected error: %v", err)
 	}
 
 	expectedSenders := []string{"alice@domain.com", "bob@test.com"}
@@ -36,8 +36,11 @@ func TestParseConfig(t *testing.T) {
 	if cfg.GeminiModel != "gemini-2.5-flash" {
 		t.Errorf("GeminiModel default = %q, want gemini-2.5-flash", cfg.GeminiModel)
 	}
-	if cfg.DBPath != "emails.db" {
-		t.Errorf("DBPath default = %q, want emails.db", cfg.DBPath)
+	if cfg.DBPath != "data/emails.db" {
+		t.Errorf("DBPath default = %q, want data/emails.db", cfg.DBPath)
+	}
+	if cfg.AttachmentsDir != "data/attachments" {
+		t.Errorf("AttachmentsDir default = %q, want data/attachments", cfg.AttachmentsDir)
 	}
 }
 
@@ -54,9 +57,9 @@ func TestParseConfigAPIKeyMode(t *testing.T) {
 		os.Unsetenv("ALLOWED_SENDERS")
 	}()
 
-	cfg, err := parseConfig()
+	cfg, err := ParseConfig()
 	if err != nil {
-		t.Fatalf("parseConfig API key mode failed: %v", err)
+		t.Fatalf("ParseConfig API key mode failed: %v", err)
 	}
 
 	if cfg.GeminiAPIKey != "AIzaSyTestKey123" {
@@ -75,9 +78,9 @@ func TestParseConfigMissingRequired(t *testing.T) {
 		os.Unsetenv("ALLOWED_SENDERS")
 	}()
 
-	_, err := parseConfig()
+	_, err := ParseConfig()
 	if err == nil {
-		t.Fatal("parseConfig expected error when GMAIL_APP_PASSWORD missing, got nil")
+		t.Fatal("ParseConfig expected error when GMAIL_APP_PASSWORD missing, got nil")
 	}
 	if !strings.Contains(err.Error(), "GMAIL_APP_PASSWORD is required") {
 		t.Errorf("expected error message to mention GMAIL_APP_PASSWORD, got: %v", err)
@@ -96,11 +99,27 @@ func TestParseConfigMissingBothAuth(t *testing.T) {
 		os.Unsetenv("ALLOWED_SENDERS")
 	}()
 
-	_, err := parseConfig()
+	_, err := ParseConfig()
 	if err == nil {
-		t.Fatal("parseConfig expected error when both GEMINI_API_KEY and GCP_PROJECT_ID missing, got nil")
+		t.Fatal("ParseConfig expected error when both GEMINI_API_KEY and GCP_PROJECT_ID missing, got nil")
 	}
 	if !strings.Contains(err.Error(), "either GEMINI_API_KEY or GCP_PROJECT_ID is required") {
 		t.Errorf("expected error message to mention either auth key, got: %v", err)
+	}
+}
+
+func TestIsAllowedSender(t *testing.T) {
+	cfg := &Config{
+		AllowedSenders: []string{"alice@test.com", "bob@test.com"},
+	}
+
+	if !cfg.IsAllowedSender("alice@test.com") {
+		t.Error("expected exact match to return true")
+	}
+	if !cfg.IsAllowedSender(" ALICE@TEST.COM ") {
+		t.Error("expected trimmed uppercase match to return true")
+	}
+	if cfg.IsAllowedSender("mallory@evil.com") {
+		t.Error("expected unauthorized sender to return false")
 	}
 }

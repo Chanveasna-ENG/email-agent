@@ -1,4 +1,4 @@
-package main
+package parser
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+
+	"email-agent/internal/models"
 
 	gomail "github.com/emersion/go-message/mail"
 )
@@ -125,9 +127,9 @@ func NormalizeSubject(subj string) string {
 }
 
 // ExtractEmailParts iterates over email MIME parts, extracting plain text body and attachments.
-func ExtractEmailParts(mr *gomail.Reader) (string, []Attachment, error) {
+func ExtractEmailParts(mr *gomail.Reader) (string, []models.Attachment, error) {
 	var bodyText string
-	var attachments []Attachment
+	var attachments []models.Attachment
 
 	for {
 		part, err := mr.NextPart()
@@ -150,7 +152,7 @@ func ExtractEmailParts(mr *gomail.Reader) (string, []Attachment, error) {
 			if filename != "" {
 				data, err := io.ReadAll(io.LimitReader(part.Body, maxAttachmentBytes))
 				if err == nil && len(data) > 0 {
-					attachments = append(attachments, Attachment{
+					attachments = append(attachments, models.Attachment{
 						Filename:    filename,
 						ContentType: contentType,
 						Data:        data,
@@ -169,7 +171,7 @@ func ExtractEmailParts(mr *gomail.Reader) (string, []Attachment, error) {
 			contentType, _, _ := h.ContentType()
 			data, err := io.ReadAll(io.LimitReader(part.Body, maxAttachmentBytes))
 			if err == nil && len(data) > 0 {
-				attachments = append(attachments, Attachment{
+				attachments = append(attachments, models.Attachment{
 					Filename:    filename,
 					ContentType: contentType,
 					Data:        data,

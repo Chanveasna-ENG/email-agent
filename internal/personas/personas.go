@@ -1,4 +1,4 @@
-package main
+package personas
 
 import (
 	"os"
@@ -10,7 +10,6 @@ import (
 var tagRegex = regexp.MustCompile(`(?i)\[([a-zA-Z0-9_\-]+)\]`)
 
 // ResolvePersona determines which persona prompt to use based on [tag] syntax in the subject or body.
-// It searches personasDir for <tag>.txt, falling back to default.txt or fallbackPrompt.
 func ResolvePersona(personasDir, subject, body, fallbackPrompt string) (string, string) {
 	tag := extractTag(subject)
 	if tag == "" {

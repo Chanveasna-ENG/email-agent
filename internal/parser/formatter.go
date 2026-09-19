@@ -1,4 +1,4 @@
-package main
+package parser
 
 import (
 	"bytes"
@@ -32,7 +32,6 @@ func FormatReply(markdownText string) (string, string, error) {
 
 	rawHTML := buf.String()
 
-	// Minimal inline CSS styling tailored for email client simplicity
 	htmlEmail := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>

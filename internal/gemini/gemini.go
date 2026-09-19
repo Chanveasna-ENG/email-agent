@@ -1,10 +1,13 @@
-package main
+package gemini
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"strings"
+
+	"email-agent/internal/config"
+	"email-agent/internal/models"
 
 	"google.golang.org/genai"
 )
@@ -21,7 +24,7 @@ type GeminiClient struct {
 }
 
 // NewGeminiClient initializes a client configured for Gemini API Key or Vertex AI.
-func NewGeminiClient(ctx context.Context, cfg *Config, systemPrompt string) (*GeminiClient, error) {
+func NewGeminiClient(ctx context.Context, cfg *config.Config, systemPrompt string) (*GeminiClient, error) {
 	var clientConfig *genai.ClientConfig
 
 	if cfg.GeminiAPIKey != "" {
@@ -54,14 +57,13 @@ func NewGeminiClient(ctx context.Context, cfg *Config, systemPrompt string) (*Ge
 }
 
 // GenerateReply calls Gemini with conversation turns, tool support, and multimodal attachments.
-func (g *GeminiClient) GenerateReply(ctx context.Context, turns []ConversationTurn, searchFn SearchCallback) (string, error) {
+func (g *GeminiClient) GenerateReply(ctx context.Context, turns []models.ConversationTurn, searchFn SearchCallback) (string, error) {
 	if len(turns) == 0 {
 		return "", fmt.Errorf("no conversation turns provided to Gemini")
 	}
 
 	contents := buildGeminiContents(turns)
 
-	// Declare search_past_emails tool and optional Google Search grounding
 	tools := []*genai.Tool{
 		{
 			FunctionDeclarations: []*genai.FunctionDeclaration{
@@ -89,17 +91,16 @@ func (g *GeminiClient) GenerateReply(ctx context.Context, turns []ConversationTu
 		})
 	}
 
-	config := &genai.GenerateContentConfig{
+	cfg := &genai.GenerateContentConfig{
 		Tools: tools,
 	}
 	if g.systemPrompt != "" {
-		config.SystemInstruction = genai.NewContentFromText(g.systemPrompt, "")
+		cfg.SystemInstruction = genai.NewContentFromText(g.systemPrompt, "")
 	}
 
-	// Tool calling loop (up to 3 hops)
 	maxHops := 3
 	for hop := 0; hop < maxHops; hop++ {
-		resp, err := g.client.Models.GenerateContent(ctx, g.model, contents, config)
+		resp, err := g.client.Models.GenerateContent(ctx, g.model, contents, cfg)
 		if err != nil {
 			return "", fmt.Errorf("gemini generate content: %w", err)
 		}
@@ -113,12 +114,10 @@ func (g *GeminiClient) GenerateReply(ctx context.Context, turns []ConversationTu
 			return outText, nil
 		}
 
-		// Append the model's call turn to history
 		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 			contents = append(contents, resp.Candidates[0].Content)
 		}
 
-		// Execute function calls
 		for _, call := range funcCalls {
 			if call.Name == "search_past_emails" {
 				queryVal, _ := call.Args["query"].(string)
@@ -147,8 +146,18 @@ func (g *GeminiClient) GenerateReply(ctx context.Context, turns []ConversationTu
 	return "", fmt.Errorf("exceeded maximum tool call hops without final text response")
 }
 
-// buildGeminiContents maps internal ConversationTurns and attachments to genai.Content structures.
-func buildGeminiContents(turns []ConversationTurn) []*genai.Content {
+// WithSystemPrompt returns a copy of GeminiClient with an updated system prompt.
+func (g *GeminiClient) WithSystemPrompt(prompt string) *GeminiClient {
+	return &GeminiClient{
+		client:             g.client,
+		model:              g.model,
+		systemPrompt:       strings.TrimSpace(prompt),
+		enableGoogleSearch: g.enableGoogleSearch,
+	}
+}
+
+// buildGeminiContents maps internal models.ConversationTurn and attachments to genai.Content structures.
+func buildGeminiContents(turns []models.ConversationTurn) []*genai.Content {
 	var contents []*genai.Content
 	for _, t := range turns {
 		role := genai.Role(t.Role)
@@ -172,14 +181,4 @@ func buildGeminiContents(turns []ConversationTurn) []*genai.Content {
 		}
 	}
 	return contents
-}
-
-// WithSystemPrompt returns a copy of GeminiClient with an updated system prompt.
-func (g *GeminiClient) WithSystemPrompt(prompt string) *GeminiClient {
-	return &GeminiClient{
-		client:             g.client,
-		model:              g.model,
-		systemPrompt:       strings.TrimSpace(prompt),
-		enableGoogleSearch: g.enableGoogleSearch,
-	}
 }

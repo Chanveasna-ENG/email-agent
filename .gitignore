@@ -5,6 +5,7 @@ credential/
 !package.json
 *.db
 attachments/
+data/
 
 # Binaries and build outputs
 *.exe

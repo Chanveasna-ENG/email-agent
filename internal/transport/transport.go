@@ -1,4 +1,4 @@
-package main
+package transport
 
 import (
 	"bytes"
@@ -14,6 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"email-agent/internal/config"
+	"email-agent/internal/models"
+	"email-agent/internal/parser"
+
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-message/mail"
@@ -21,14 +25,14 @@ import (
 
 // EmailTransport manages IMAP receiving and SMTP sending.
 type EmailTransport struct {
-	cfg         *Config
+	cfg         *config.Config
 	imapMu      sync.Mutex
 	imapClient  *imapclient.Client
 	newMailChan chan struct{}
 }
 
 // NewTransport initializes a transport instance.
-func NewTransport(cfg *Config) *EmailTransport {
+func NewTransport(cfg *config.Config) *EmailTransport {
 	return &EmailTransport{
 		cfg:         cfg,
 		newMailChan: make(chan struct{}, 10),
@@ -112,7 +116,7 @@ func (t *EmailTransport) ensureIMAPConnected() (*imapclient.Client, error) {
 }
 
 // FetchUnseen retrieves all unseen email messages from INBOX.
-func (t *EmailTransport) FetchUnseen(ctx context.Context) ([]*EmailMessage, error) {
+func (t *EmailTransport) FetchUnseen(ctx context.Context) ([]*models.EmailMessage, error) {
 	client, err := t.ensureIMAPConnected()
 	if err != nil {
 		return nil, err
@@ -132,7 +136,7 @@ func (t *EmailTransport) FetchUnseen(ctx context.Context) ([]*EmailMessage, erro
 		return nil, nil
 	}
 
-	var messages []*EmailMessage
+	var messages []*models.EmailMessage
 	for _, uid := range uids {
 		select {
 		case <-ctx.Done():
@@ -153,7 +157,7 @@ func (t *EmailTransport) FetchUnseen(ctx context.Context) ([]*EmailMessage, erro
 }
 
 // FetchByMessageID searches INBOX for a specific message by its Message-ID header.
-func (t *EmailTransport) FetchByMessageID(ctx context.Context, messageID string) (*EmailMessage, error) {
+func (t *EmailTransport) FetchByMessageID(ctx context.Context, messageID string) (*models.EmailMessage, error) {
 	cleanID := strings.TrimSpace(messageID)
 	if cleanID == "" {
 		return nil, nil
@@ -180,12 +184,11 @@ func (t *EmailTransport) FetchByMessageID(ctx context.Context, messageID string)
 		return nil, nil
 	}
 
-	// Fetch the most recent match for this Message-ID
 	return t.fetchMessageByUID(client, uids[len(uids)-1])
 }
 
 // fetchMessageByUID retrieves message body and headers for a given UID.
-func (t *EmailTransport) fetchMessageByUID(client *imapclient.Client, uid imap.UID) (*EmailMessage, error) {
+func (t *EmailTransport) fetchMessageByUID(client *imapclient.Client, uid imap.UID) (*models.EmailMessage, error) {
 	bodySection := &imap.FetchItemBodySection{}
 	fetchOpts := &imap.FetchOptions{
 		UID:         true,
@@ -213,7 +216,7 @@ func (t *EmailTransport) fetchMessageByUID(client *imapclient.Client, uid imap.U
 }
 
 // parseRawEmail decodes MIME headers, plain text body, and extracts attachments.
-func parseRawEmail(uid uint32, rawBytes []byte, attachmentsDir string) (*EmailMessage, error) {
+func parseRawEmail(uid uint32, rawBytes []byte, attachmentsDir string) (*models.EmailMessage, error) {
 	mr, err := mail.CreateReader(bytes.NewReader(rawBytes))
 	if err != nil {
 		return nil, fmt.Errorf("create mail reader: %w", err)
@@ -227,14 +230,14 @@ func parseRawEmail(uid uint32, rawBytes []byte, attachmentsDir string) (*EmailMe
 	if len(fromList) > 0 {
 		senderRaw = fromList[0].String()
 	}
-	senderEmail := ExtractEmailAddress(senderRaw)
+	senderEmail := parser.ExtractEmailAddress(senderRaw)
 
 	messageID, _ := header.MessageID()
 	inReplyTo := header.Get("In-Reply-To")
 	rawReferences := header.Get("References")
-	references := ParseReferences(rawReferences)
+	references := parser.ParseReferences(rawReferences)
 
-	bodyText, attachments, _ := ExtractEmailParts(mr)
+	bodyText, attachments, _ := parser.ExtractEmailParts(mr)
 
 	// Fallback if multipart had no plain text
 	if bodyText == "" {
@@ -242,10 +245,10 @@ func parseRawEmail(uid uint32, rawBytes []byte, attachmentsDir string) (*EmailMe
 	}
 
 	if err := saveAttachmentsToDisk(attachmentsDir, messageID, attachments); err != nil {
-		// Log or continue; do not abort email receipt on disk write error
+		// Non-fatal disk write error
 	}
 
-	return &EmailMessage{
+	return &models.EmailMessage{
 		UID:         uid,
 		MessageID:   messageID,
 		InReplyTo:   inReplyTo,
@@ -260,7 +263,7 @@ func parseRawEmail(uid uint32, rawBytes []byte, attachmentsDir string) (*EmailMe
 }
 
 // saveAttachmentsToDisk persists extracted attachments to attachments/<message_id>/<filename>.
-func saveAttachmentsToDisk(baseDir, messageID string, attachments []Attachment) error {
+func saveAttachmentsToDisk(baseDir, messageID string, attachments []models.Attachment) error {
 	if len(attachments) == 0 || baseDir == "" {
 		return nil
 	}
@@ -323,7 +326,6 @@ func (t *EmailTransport) WaitForMail(ctx context.Context) error {
 
 	idleCmd, err := client.Idle()
 	if err != nil {
-		// Fallback to simple polling interval if IDLE fails
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -352,7 +354,7 @@ func (t *EmailTransport) SendReply(to, subject, inReplyTo string, references []s
 		return fmt.Errorf("build mime message: %w", err)
 	}
 
-	destAddr := ExtractEmailAddress(to)
+	destAddr := parser.ExtractEmailAddress(to)
 	if destAddr == "" {
 		return fmt.Errorf("invalid recipient email address: %q", to)
 	}
@@ -360,7 +362,6 @@ func (t *EmailTransport) SendReply(to, subject, inReplyTo string, references []s
 	auth := smtp.PlainAuth("", t.cfg.GmailAddress, t.cfg.GmailAppPassword, "smtp.gmail.com")
 	addr := "smtp.gmail.com:587"
 
-	// Connect with TLS
 	tlsconfig := &tls.Config{
 		ServerName: "smtp.gmail.com",
 	}
@@ -411,7 +412,6 @@ func buildMimeMessage(from, to, subject, inReplyTo string, references []string, 
 	}
 	boundary := fmt.Sprintf("boundary_%s", hex.EncodeToString(b))
 
-	// Combine references: prior references + inReplyTo
 	var allRefs []string
 	for _, r := range references {
 		clean := strings.TrimSpace(r)

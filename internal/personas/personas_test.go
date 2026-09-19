@@ -1,4 +1,4 @@
-package main
+package personas
 
 import (
 	"os"
@@ -21,11 +21,11 @@ func TestResolvePersona(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		subject      string
-		body         string
-		wantPrompt   string
-		wantPersona  string
+		name        string
+		subject     string
+		body        string
+		wantPrompt  string
+		wantPersona string
 	}{
 		{
 			name:        "Subject with tag",

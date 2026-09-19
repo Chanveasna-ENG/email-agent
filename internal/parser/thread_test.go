@@ -1,14 +1,16 @@
-package main
+package parser
 
 import (
 	"reflect"
 	"testing"
+
+	"email-agent/internal/models"
 )
 
 func TestAssembleThread(t *testing.T) {
 	agentEmail := "agent@domain.com"
 
-	currentMsg := &EmailMessage{
+	currentMsg := &models.EmailMessage{
 		MessageID:   "<current@mail>",
 		SenderEmail: "user@domain.com",
 		BodyText:    "What is the capital of France?\n\nOn Fri wrote:\n> past quote",
@@ -19,7 +21,7 @@ func TestAssembleThread(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AssembleThread failed: %v", err)
 		}
-		expected := []ConversationTurn{
+		expected := []models.ConversationTurn{
 			{Role: "user", Content: "What is the capital of France?"},
 		}
 		if !reflect.DeepEqual(turns, expected) {
@@ -28,7 +30,7 @@ func TestAssembleThread(t *testing.T) {
 	})
 
 	t.Run("With prior messages", func(t *testing.T) {
-		db := map[string]*EmailMessage{
+		db := map[string]*models.EmailMessage{
 			"<msg1@mail>": {
 				MessageID:   "<msg1@mail>",
 				SenderEmail: "user@domain.com",
@@ -41,7 +43,7 @@ func TestAssembleThread(t *testing.T) {
 			},
 		}
 
-		mockFetcher := func(msgID string) (*EmailMessage, error) {
+		mockFetcher := func(msgID string) (*models.EmailMessage, error) {
 			return db[msgID], nil
 		}
 
@@ -51,7 +53,7 @@ func TestAssembleThread(t *testing.T) {
 			t.Fatalf("AssembleThread failed: %v", err)
 		}
 
-		expected := []ConversationTurn{
+		expected := []models.ConversationTurn{
 			{Role: "user", Content: "Hello agent"},
 			{Role: "model", Content: "Hello! How can I help you today?"},
 			{Role: "user", Content: "What is the capital of France?"},
@@ -62,7 +64,7 @@ func TestAssembleThread(t *testing.T) {
 	})
 
 	t.Run("Missing prior message skipped gracefully", func(t *testing.T) {
-		mockFetcher := func(msgID string) (*EmailMessage, error) {
+		mockFetcher := func(msgID string) (*models.EmailMessage, error) {
 			return nil, nil // Not found
 		}
 
@@ -72,7 +74,7 @@ func TestAssembleThread(t *testing.T) {
 			t.Fatalf("AssembleThread failed: %v", err)
 		}
 
-		expected := []ConversationTurn{
+		expected := []models.ConversationTurn{
 			{Role: "user", Content: "What is the capital of France?"},
 		}
 		if !reflect.DeepEqual(turns, expected) {

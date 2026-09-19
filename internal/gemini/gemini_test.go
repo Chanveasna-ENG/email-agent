@@ -1,19 +1,21 @@
-package main
+package gemini
 
 import (
 	"testing"
+
+	"email-agent/internal/models"
 
 	"google.golang.org/genai"
 )
 
 func TestBuildGeminiContents(t *testing.T) {
-	turns := []ConversationTurn{
+	turns := []models.ConversationTurn{
 		{Role: "user", Content: "Hello world"},
 		{Role: "model", Content: "Hello! How can I help?"},
 		{
 			Role:    "user",
 			Content: "Inspect this attachment",
-			Attachments: []Attachment{
+			Attachments: []models.Attachment{
 				{
 					Filename:    "doc.pdf",
 					ContentType: "application/pdf",
@@ -35,7 +37,6 @@ func TestBuildGeminiContents(t *testing.T) {
 		}
 	}
 
-	// Verify multimodal turn 2 has both text part and binary part
 	if len(contents[2].Parts) != 2 {
 		t.Fatalf("content[2] expected 2 parts, got %d", len(contents[2].Parts))
 	}

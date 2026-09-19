@@ -1,0 +1,18 @@
+services:
+  email-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: email-agent
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/app/data/emails.db
+      - ATTACHMENTS_DIR=/app/data/attachments
+      - PERSONAS_DIR=/app/personas
+    volumes:
+      - ./data:/app/data
+      - ./personas:/app/personas:ro
+    security_opt:
+      - no-new-privileges:true

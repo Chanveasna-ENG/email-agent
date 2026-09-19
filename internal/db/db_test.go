@@ -1,9 +1,11 @@
-package main
+package db
 
 import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"email-agent/internal/models"
 )
 
 func TestEmailDBSaveAndSearch(t *testing.T) {
@@ -16,19 +18,19 @@ func TestEmailDBSaveAndSearch(t *testing.T) {
 	}
 	defer db.Close()
 
-	msg1 := &EmailMessage{
+	msg1 := &models.EmailMessage{
 		MessageID:   "<msg101@test>",
 		Subject:     "Project Phoenix Budget Plan",
 		Sender:      "Boss <boss@test.com>",
 		SenderEmail: "boss@test.com",
 		BodyText:    "The budget approved for Q3 is $50,000.",
 		Date:        time.Now(),
-		Attachments: []Attachment{
+		Attachments: []models.Attachment{
 			{Filename: "budget.pdf", ContentType: "application/pdf", Size: 1024},
 		},
 	}
 
-	msg2 := &EmailMessage{
+	msg2 := &models.EmailMessage{
 		MessageID:   "<msg102@test>",
 		Subject:     "Lunch Catering",
 		Sender:      "Colleague <colleague@test.com>",

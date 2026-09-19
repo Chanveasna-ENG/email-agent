@@ -1,15 +1,17 @@
-package main
+package parser
 
 import (
 	"strings"
+
+	"email-agent/internal/models"
 )
 
 // MessageFetcher is an abstraction for querying prior emails by Message-ID.
-type MessageFetcher func(messageID string) (*EmailMessage, error)
+type MessageFetcher func(messageID string) (*models.EmailMessage, error)
 
 // AssembleThread reconstructs chronological conversation turns from references and the current message.
-func AssembleThread(fetcher MessageFetcher, references []string, currentMsg *EmailMessage, agentEmail string) ([]ConversationTurn, error) {
-	var rawTurns []ConversationTurn
+func AssembleThread(fetcher MessageFetcher, references []string, currentMsg *models.EmailMessage, agentEmail string) ([]models.ConversationTurn, error) {
+	var rawTurns []models.ConversationTurn
 	cleanAgentEmail := strings.ToLower(strings.TrimSpace(agentEmail))
 
 	// Fetch referenced prior messages in chronological order
@@ -22,22 +24,23 @@ func AssembleThread(fetcher MessageFetcher, references []string, currentMsg *Ema
 		if fetcher != nil {
 			msg, err := fetcher(cleanRefID)
 			if err != nil || msg == nil {
-				// Prior message may be deleted or outside folder; skip gracefully
 				continue
 			}
 
 			cleanSender := strings.ToLower(strings.TrimSpace(msg.SenderEmail))
 			if cleanSender == cleanAgentEmail {
-				rawTurns = append(rawTurns, ConversationTurn{
-					Role:    "model",
-					Content: strings.TrimSpace(msg.BodyText),
+				rawTurns = append(rawTurns, models.ConversationTurn{
+					Role:        "model",
+					Content:     strings.TrimSpace(msg.BodyText),
+					Attachments: msg.Attachments,
 				})
 			} else {
 				userText := StripQuotedReply(msg.BodyText)
-				if userText != "" {
-					rawTurns = append(rawTurns, ConversationTurn{
-						Role:    "user",
-						Content: userText,
+				if userText != "" || len(msg.Attachments) > 0 {
+					rawTurns = append(rawTurns, models.ConversationTurn{
+						Role:        "user",
+						Content:     userText,
+						Attachments: msg.Attachments,
 					})
 				}
 			}
@@ -49,19 +52,27 @@ func AssembleThread(fetcher MessageFetcher, references []string, currentMsg *Ema
 	if currentUserText == "" {
 		currentUserText = strings.TrimSpace(currentMsg.BodyText)
 	}
-	rawTurns = append(rawTurns, ConversationTurn{
-		Role:    "user",
-		Content: currentUserText,
+	rawTurns = append(rawTurns, models.ConversationTurn{
+		Role:        "user",
+		Content:     currentUserText,
+		Attachments: currentMsg.Attachments,
 	})
 
 	// Consolidate consecutive turns with the same role to conform to Gemini multi-turn API
-	var turns []ConversationTurn
+	var turns []models.ConversationTurn
 	for _, t := range rawTurns {
-		if t.Content == "" {
+		if t.Content == "" && len(t.Attachments) == 0 {
 			continue
 		}
 		if len(turns) > 0 && turns[len(turns)-1].Role == t.Role {
-			turns[len(turns)-1].Content += "\n\n" + t.Content
+			if t.Content != "" {
+				if turns[len(turns)-1].Content != "" {
+					turns[len(turns)-1].Content += "\n\n" + t.Content
+				} else {
+					turns[len(turns)-1].Content = t.Content
+				}
+			}
+			turns[len(turns)-1].Attachments = append(turns[len(turns)-1].Attachments, t.Attachments...)
 		} else {
 			turns = append(turns, t)
 		}

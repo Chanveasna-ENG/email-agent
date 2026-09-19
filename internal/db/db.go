@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"database/sql"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"email-agent/internal/models"
 
 	_ "modernc.org/sqlite"
 )
@@ -71,7 +73,7 @@ func NewEmailDB(dbPath string) (*EmailDB, error) {
 }
 
 // SaveEmail indexes an email and its attachment records into SQLite.
-func (e *EmailDB) SaveEmail(msg *EmailMessage) error {
+func (e *EmailDB) SaveEmail(msg *models.EmailMessage) error {
 	if msg == nil || strings.TrimSpace(msg.MessageID) == "" {
 		return nil
 	}
@@ -121,7 +123,7 @@ func (e *EmailDB) SaveEmail(msg *EmailMessage) error {
 }
 
 // GetEmailByMessageID retrieves a cached message by its Message-ID header.
-func (e *EmailDB) GetEmailByMessageID(messageID string) (*EmailMessage, error) {
+func (e *EmailDB) GetEmailByMessageID(messageID string) (*models.EmailMessage, error) {
 	cleanID := strings.TrimSpace(messageID)
 	if cleanID == "" {
 		return nil, nil
@@ -133,7 +135,7 @@ func (e *EmailDB) GetEmailByMessageID(messageID string) (*EmailMessage, error) {
 		WHERE message_id = ?;
 	`, cleanID)
 
-	var msg EmailMessage
+	var msg models.EmailMessage
 	var inReplyTo sql.NullString
 	if err := row.Scan(&msg.MessageID, &inReplyTo, &msg.Subject, &msg.Sender, &msg.SenderEmail, &msg.BodyText, &msg.Date); err != nil {
 		if err == sql.ErrNoRows {
@@ -149,7 +151,7 @@ func (e *EmailDB) GetEmailByMessageID(messageID string) (*EmailMessage, error) {
 }
 
 // SearchEmails searches cached whitelisted emails using FTS5 (with LIKE fallback).
-func (e *EmailDB) SearchEmails(query string, limit int) ([]*EmailMessage, error) {
+func (e *EmailDB) SearchEmails(query string, limit int) ([]*models.EmailMessage, error) {
 	cleanQuery := strings.TrimSpace(query)
 	if cleanQuery == "" {
 		return nil, nil
@@ -158,7 +160,6 @@ func (e *EmailDB) SearchEmails(query string, limit int) ([]*EmailMessage, error)
 		limit = 5
 	}
 
-	// Attempt FTS5 MATCH query first
 	ftsQuery := `
 		SELECT e.message_id, e.in_reply_to, e.subject, e.sender, e.sender_email, e.body_text, e.date
 		FROM emails e
@@ -168,11 +169,9 @@ func (e *EmailDB) SearchEmails(query string, limit int) ([]*EmailMessage, error)
 		LIMIT ?;
 	`
 
-	// Clean query for FTS syntax
 	sanitized := strings.ReplaceAll(cleanQuery, `"`, `""`)
 	rows, err := e.db.Query(ftsQuery, `"`+sanitized+`"`, limit)
 	if err != nil {
-		// Fallback to LIKE if FTS expression parsing fails
 		likePattern := "%" + cleanQuery + "%"
 		fallbackQuery := `
 			SELECT message_id, in_reply_to, subject, sender, sender_email, body_text, date
@@ -188,9 +187,9 @@ func (e *EmailDB) SearchEmails(query string, limit int) ([]*EmailMessage, error)
 	}
 	defer rows.Close()
 
-	var results []*EmailMessage
+	var results []*models.EmailMessage
 	for rows.Next() {
-		var msg EmailMessage
+		var msg models.EmailMessage
 		var inReplyTo sql.NullString
 		if err := rows.Scan(&msg.MessageID, &inReplyTo, &msg.Subject, &msg.Sender, &msg.SenderEmail, &msg.BodyText, &msg.Date); err != nil {
 			continue

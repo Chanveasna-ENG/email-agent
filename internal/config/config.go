@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -32,11 +32,11 @@ type Config struct {
 // LoadConfig reads configuration from environment variables and an optional .env file.
 func LoadConfig() (*Config, error) {
 	_ = godotenv.Load() // optional .env file
-	return parseConfig()
+	return ParseConfig()
 }
 
-// parseConfig extracts and validates configuration from environment variables.
-func parseConfig() (*Config, error) {
+// ParseConfig extracts and validates configuration from environment variables.
+func ParseConfig() (*Config, error) {
 	gmailAddress := strings.TrimSpace(os.Getenv("GMAIL_ADDRESS"))
 	gmailPassword := strings.TrimSpace(os.Getenv("GMAIL_APP_PASSWORD"))
 	geminiAPIKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
@@ -72,14 +72,14 @@ func parseConfig() (*Config, error) {
 	if promptPath == "" {
 		promptPath = "config/system_prompt.txt"
 		if _, err := os.Stat(promptPath); os.IsNotExist(err) {
-			promptPath = "system_prompt.txt"
+			promptPath = "personas/default.txt"
 		}
 	}
 	if dbPath == "" {
-		dbPath = "emails.db"
+		dbPath = "data/emails.db"
 	}
 	if attachmentsDir == "" {
-		attachmentsDir = "attachments"
+		attachmentsDir = "data/attachments"
 	}
 	if personasDir == "" {
 		personasDir = "personas"
@@ -129,4 +129,15 @@ func parseConfig() (*Config, error) {
 		IdleTimeout:        idleTimeout,
 		PollInterval:       pollInterval,
 	}, nil
+}
+
+// IsAllowedSender checks if an email address matches the sender whitelist (case-insensitive, trimmed).
+func (c *Config) IsAllowedSender(sender string) bool {
+	cleanSender := strings.ToLower(strings.TrimSpace(sender))
+	for _, a := range c.AllowedSenders {
+		if strings.ToLower(strings.TrimSpace(a)) == cleanSender {
+			return true
+		}
+	}
+	return false
 }

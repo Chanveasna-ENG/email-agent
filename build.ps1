@@ -1,6 +1,7 @@
 param (
     [switch]$TestOnly,
-    [switch]$BuildOnly
+    [switch]$BuildOnly,
+    [switch]$Linux
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +18,21 @@ if (-not $BuildOnly) {
 }
 
 if (-not $TestOnly) {
-    Write-Host "==> Compiling email-agent.exe..." -ForegroundColor Cyan
-    go build -v -o email-agent.exe .
-    Write-Host "==> Build complete: email-agent.exe" -ForegroundColor Green
+    if ($Linux) {
+        Write-Host "==> Cross-compiling static Linux binary (bin/email-agent)..." -ForegroundColor Cyan
+        $env:CGO_ENABLED = "0"
+        $env:GOOS = "linux"
+        $env:GOARCH = "amd64"
+        if (-not (Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }
+        go build -ldflags="-s -w" -v -o bin/email-agent ./cmd/email-agent
+        Remove-Item Env:\CGO_ENABLED
+        Remove-Item Env:\GOOS
+        Remove-Item Env:\GOARCH
+        Write-Host "==> Linux build complete: bin/email-agent" -ForegroundColor Green
+    } else {
+        Write-Host "==> Compiling email-agent.exe..." -ForegroundColor Cyan
+        go build -v -o email-agent.exe ./cmd/email-agent
+        Write-Host "==> Windows build complete: email-agent.exe" -ForegroundColor Green
+    }
 }
+
