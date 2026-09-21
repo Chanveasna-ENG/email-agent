@@ -64,6 +64,13 @@ fi
 
 # 3. Check and always recompile static binaries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -d "/usr/local/go/bin" ]; then
+  export PATH="/usr/local/go/bin:${PATH}"
+fi
+if [ -d "${REAL_HOME}/go/bin" ]; then
+  export PATH="${REAL_HOME}/go/bin:${PATH}"
+fi
+
 if ! command -v go >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     echo "==> 'go' compiler not found. Installing golang-go via apt..."

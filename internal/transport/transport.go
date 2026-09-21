@@ -80,12 +80,34 @@ func (t *EmailTransport) ConnectIMAP() error {
 	return nil
 }
 
+// InvalidateIMAP safely closes and resets the active IMAP connection.
+func (t *EmailTransport) InvalidateIMAP() {
+	t.imapMu.Lock()
+	defer t.imapMu.Unlock()
+	t.invalidateIMAPLocked()
+}
+
+func (t *EmailTransport) invalidateIMAPLocked() {
+	if t.imapClient != nil {
+		_ = t.imapClient.Close()
+		t.imapClient = nil
+	}
+}
+
 // ensureIMAPConnected verifies connection or reconnects if closed.
 func (t *EmailTransport) ensureIMAPConnected() (*imapclient.Client, error) {
 	t.imapMu.Lock()
 	defer t.imapMu.Unlock()
 
-	if t.imapClient == nil || t.imapClient.State() < imap.ConnStateAuthenticated {
+	if t.imapClient != nil {
+		if t.imapClient.State() < imap.ConnStateAuthenticated {
+			t.invalidateIMAPLocked()
+		} else if err := t.imapClient.Noop().Wait(); err != nil {
+			t.invalidateIMAPLocked()
+		}
+	}
+
+	if t.imapClient == nil {
 		opts := &imapclient.Options{
 			UnilateralDataHandler: &imapclient.UnilateralDataHandler{
 				Mailbox: func(data *imapclient.UnilateralDataMailbox) {
@@ -128,6 +150,7 @@ func (t *EmailTransport) FetchUnseen(ctx context.Context) ([]*models.EmailMessag
 
 	uidsData, err := client.UIDSearch(criteria, nil).Wait()
 	if err != nil {
+		t.InvalidateIMAP()
 		return nil, fmt.Errorf("search unseen messages: %w", err)
 	}
 
@@ -176,6 +199,7 @@ func (t *EmailTransport) FetchByMessageID(ctx context.Context, messageID string)
 
 	uidsData, err := client.UIDSearch(criteria, nil).Wait()
 	if err != nil {
+		t.InvalidateIMAP()
 		return nil, fmt.Errorf("search by message id: %w", err)
 	}
 
@@ -311,10 +335,14 @@ func (t *EmailTransport) MarkSeen(ctx context.Context, uid uint32) error {
 		Silent: true,
 	}
 
-	return client.Store(uidSet, storeFlags, nil).Close()
+	err = client.Store(uidSet, storeFlags, nil).Close()
+	if err != nil {
+		t.InvalidateIMAP()
+	}
+	return err
 }
 
-// WaitForMail waits for incoming emails using IMAP IDLE and poll timeout.
+// WaitForMail waits for incoming emails using true real-time IMAP IDLE push.
 func (t *EmailTransport) WaitForMail(ctx context.Context) error {
 	client, err := t.ensureIMAPConnected()
 	if err != nil {
@@ -328,12 +356,19 @@ func (t *EmailTransport) WaitForMail(ctx context.Context) error {
 
 	idleCmd, err := client.Idle()
 	if err != nil {
+		t.InvalidateIMAP()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(t.cfg.PollInterval):
 			return nil
 		}
+	}
+
+	// 24 minutes keep-alive refresh (under Gmail 29-minute idle drop window per RFC 2177)
+	idleRefresh := 24 * time.Minute
+	if t.cfg.IdleTimeout > 2*time.Minute && t.cfg.IdleTimeout < 28*time.Minute {
+		idleRefresh = t.cfg.IdleTimeout - time.Minute
 	}
 
 	select {
@@ -343,7 +378,7 @@ func (t *EmailTransport) WaitForMail(ctx context.Context) error {
 	case <-t.newMailChan:
 		_ = idleCmd.Close()
 		return nil
-	case <-time.After(t.cfg.PollInterval):
+	case <-time.After(idleRefresh):
 		_ = idleCmd.Close()
 		return nil
 	}

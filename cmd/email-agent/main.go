@@ -95,6 +95,9 @@ func main() {
 
 	log.Println("[INFO] Entering main listener loop...")
 
+	fetchBackoff := 5 * time.Second
+	const maxFetchBackoff = 60 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -105,10 +108,17 @@ func main() {
 
 		messages, err := emailTransport.FetchUnseen(ctx)
 		if err != nil {
-			log.Printf("[ERROR] Error fetching unseen messages: %v", err)
-			time.Sleep(5 * time.Second)
+			log.Printf("[ERROR] Error fetching unseen messages: %v (retrying in %v)", err, fetchBackoff)
+			time.Sleep(fetchBackoff)
+			if fetchBackoff < maxFetchBackoff {
+				fetchBackoff *= 2
+				if fetchBackoff > maxFetchBackoff {
+					fetchBackoff = maxFetchBackoff
+				}
+			}
 			continue
 		}
+		fetchBackoff = 5 * time.Second
 
 		for _, msg := range messages {
 			if processedUIDs[msg.UID] {

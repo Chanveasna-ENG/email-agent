@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"email-agent/internal/config"
 	"email-agent/internal/models"
 )
 
@@ -91,5 +92,15 @@ func TestSaveAttachmentsToDisk(t *testing.T) {
 	evilPath := filepath.Join(tempDir, "test123@domain.com", "evil.sh")
 	if data, err := os.ReadFile(evilPath); err != nil || string(data) != "echo pwn" {
 		t.Errorf("failed reading sanitized evil.sh at %s: %v", evilPath, err)
+	}
+}
+
+func TestInvalidateIMAP(t *testing.T) {
+	cfg := &config.Config{}
+	trans := NewTransport(cfg)
+
+	trans.InvalidateIMAP()
+	if trans.imapClient != nil {
+		t.Errorf("expected imapClient to be nil")
 	}
 }
