@@ -17,7 +17,7 @@ type Config struct {
 	AllowedSenders     []string
 	AIBackend          string
 	AntigravityBin     string
-	SkillsDir          string
+	DNSServer          string
 	WorkspaceDir       string
 	GeminiAPIKey       string
 	GCPProjectID       string
@@ -27,7 +27,6 @@ type Config struct {
 	SystemPromptPath   string
 	DBPath             string
 	AttachmentsDir     string
-	PersonasDir        string
 	EnableGoogleSearch bool
 	IdleTimeout        time.Duration
 	PollInterval       time.Duration
@@ -52,13 +51,7 @@ func ParseConfig() (*Config, error) {
 	if agyBin == "" {
 		agyBin = "agy"
 	}
-	skillsDir := strings.TrimSpace(os.Getenv("SKILLS_DIR"))
-	if skillsDir == "" {
-		skillsDir = strings.TrimSpace(os.Getenv("PERSONAS_DIR"))
-		if skillsDir == "" {
-			skillsDir = "skills"
-		}
-	}
+	dnsServer := strings.TrimSpace(os.Getenv("DNS_SERVER"))
 	workspaceDir := strings.TrimSpace(os.Getenv("AGY_WORKSPACE_DIR"))
 	if workspaceDir == "" {
 		workspaceDir = "workspace"
@@ -93,13 +86,7 @@ func ParseConfig() (*Config, error) {
 		geminiModel = "gemini-2.5-flash"
 	}
 	if promptPath == "" {
-		promptPath = "skills/default/SKILL.md"
-		if _, err := os.Stat(promptPath); os.IsNotExist(err) {
-			promptPath = "config/system_prompt.txt"
-			if _, err := os.Stat(promptPath); os.IsNotExist(err) {
-				promptPath = "personas/default.txt"
-			}
-		}
+		promptPath = "config/system_prompt.txt"
 	}
 	if dbPath == "" {
 		dbPath = "data/emails.db"
@@ -141,7 +128,7 @@ func ParseConfig() (*Config, error) {
 		AllowedSenders:     allowedSenders,
 		AIBackend:          aiBackend,
 		AntigravityBin:     agyBin,
-		SkillsDir:          skillsDir,
+		DNSServer:          dnsServer,
 		WorkspaceDir:       workspaceDir,
 		GeminiAPIKey:       geminiAPIKey,
 		GCPProjectID:       gcpProjectID,
@@ -151,7 +138,6 @@ func ParseConfig() (*Config, error) {
 		SystemPromptPath:   promptPath,
 		DBPath:             dbPath,
 		AttachmentsDir:     attachmentsDir,
-		PersonasDir:        skillsDir,
 		EnableGoogleSearch: enableGoogleSearch,
 		IdleTimeout:        idleTimeout,
 		PollInterval:       pollInterval,

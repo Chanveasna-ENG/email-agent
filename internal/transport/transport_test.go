@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"email-agent/internal/config"
 	"email-agent/internal/models"
@@ -102,5 +103,31 @@ func TestInvalidateIMAP(t *testing.T) {
 	trans.InvalidateIMAP()
 	if trans.imapClient != nil {
 		t.Errorf("expected imapClient to be nil")
+	}
+}
+
+func TestCreateDialerWithDNS(t *testing.T) {
+	// Test without custom DNS server
+	dialer := createDialerWithDNS("", 10*time.Second)
+	if dialer == nil {
+		t.Fatal("expected non-nil dialer")
+	}
+	if dialer.Resolver == nil {
+		t.Fatal("expected non-nil resolver in dialer")
+	}
+	if !dialer.Resolver.PreferGo {
+		t.Error("expected PreferGo to be true")
+	}
+
+	// Test with custom DNS server without port
+	dialerCustom := createDialerWithDNS("192.168.1.1", 10*time.Second)
+	if dialerCustom == nil || dialerCustom.Resolver == nil {
+		t.Fatal("expected non-nil dialer with custom DNS")
+	}
+
+	// Test with custom DNS server with port
+	dialerWithPort := createDialerWithDNS("1.1.1.1:53", 10*time.Second)
+	if dialerWithPort == nil || dialerWithPort.Resolver == nil {
+		t.Fatal("expected non-nil dialer with custom DNS port")
 	}
 }

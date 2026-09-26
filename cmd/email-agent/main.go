@@ -17,7 +17,6 @@ import (
 	"email-agent/internal/gemini"
 	"email-agent/internal/models"
 	"email-agent/internal/parser"
-	"email-agent/internal/skills"
 	"email-agent/internal/transport"
 )
 
@@ -149,11 +148,7 @@ func main() {
 				log.Printf("[WARN] Failed indexing message UID=%d into SQLite: %v", msg.UID, err)
 			}
 
-			// 3. Resolve active skill instruction
-			activePrompt, skillName := skills.ResolveSkill(cfg.SkillsDir, msg.Subject, msg.BodyText, systemPrompt)
-			log.Printf("[INFO] Using skill %q for UID=%d", skillName, msg.UID)
-
-			// 4. Reconstruct conversation thread history (check local cache first, fallback to IMAP)
+			// 3. Reconstruct conversation thread history (check local cache first, fallback to IMAP)
 			fetcher := func(msgID string) (*models.EmailMessage, error) {
 				if localMsg, err := emailDB.GetEmailByMessageID(msgID); err == nil && localMsg != nil {
 					return localMsg, nil
@@ -170,77 +165,31 @@ func main() {
 
 			var replyMarkdown string
 			if cfg.AIBackend == "antigravity" {
-				var promptBuilder strings.Builder
-				promptBuilder.WriteString(fmt.Sprintf("Inbound email from: %s\nSubject: %s\nDate: %s\n",
-					msg.Sender, msg.Subject, msg.Date.Format(time.RFC1123Z)))
-				if len(msg.Attachments) > 0 {
-					promptBuilder.WriteString("Attachments:\n")
-					for _, att := range msg.Attachments {
-						promptBuilder.WriteString(fmt.Sprintf("- %s (%s, path: %s)\n", att.Filename, att.ContentType, att.Path))
-					}
-				}
-				if activePrompt != "" {
-					promptBuilder.WriteString(fmt.Sprintf("\n[Active Skill - %s]:\n%s\n", skillName, activePrompt))
-				}
-
-				if len(turns) > 1 {
-					promptBuilder.WriteString("\n[Conversation Thread History]:\n")
-					for i, t := range turns {
-						roleLabel := "User"
-						if t.Role == "model" {
-							roleLabel = "Assistant"
-						}
-						promptBuilder.WriteString(fmt.Sprintf("Turn %d (%s):\n%s\n\n", i+1, roleLabel, strings.TrimSpace(t.Content)))
-					}
-				} else {
-					promptBuilder.WriteString(fmt.Sprintf("\nEmail Content:\n%s\n", msg.BodyText))
-				}
-
-				// Automated keyword search match injection
-				lowerBody := strings.ToLower(msg.Subject + " " + msg.BodyText)
-				if strings.Contains(lowerBody, "discuss") ||
-					strings.Contains(lowerBody, "last time") ||
-					strings.Contains(lowerBody, "previous") ||
-					strings.Contains(lowerBody, "earlier") ||
-					strings.Contains(lowerBody, "remember") ||
-					strings.Contains(lowerBody, "search") {
-					words := strings.Fields(msg.Subject + " " + msg.BodyText)
-					for _, w := range words {
-						cleanW := strings.Trim(w, "?.,!\"'()[]")
-						if len(cleanW) > 3 {
-							matches, _ := emailDB.SearchEmails(cleanW, 3)
-							var matchItems []string
-							for _, m := range matches {
-								if m.MessageID == msg.MessageID {
-									continue
-								}
-								snip := strings.TrimSpace(m.BodyText)
-								if len(snip) > 200 {
-									snip = snip[:200] + "..."
-								}
-								matchItems = append(matchItems, fmt.Sprintf("- [%s] From: %s | Subject: %q | %s",
-									m.Date.Format("2006-01-02 15:04"), m.Sender, m.Subject, snip))
-							}
-							if len(matchItems) > 0 {
-								promptBuilder.WriteString(fmt.Sprintf("\n[Relevant Past Email Archive Matches for %q]:\n%s\n", cleanW, strings.Join(matchItems, "\n")))
-								break
-							}
+				// Pass 1: Extract search query across conversations if context is required
+				var archiveContext string
+				searchPrompt := parser.BuildSearchPrompt(msg.Subject, msg.BodyText)
+				queryRaw, err := agyRunner.Execute(ctx, searchPrompt)
+				if err == nil {
+					query := parser.ExtractSearchQuery(queryRaw)
+					if query != "" {
+						log.Printf("[INFO] Antigravity identified archive search query: %q for UID=%d", query, msg.UID)
+						matches, err := emailDB.SearchEmails(query, 5)
+						if err == nil && len(matches) > 0 {
+							archiveContext = parser.FormatArchiveContext(matches, msg.MessageID)
 						}
 					}
 				}
 
-				promptBuilder.WriteString("\nPlease write a concise, professional reply to the sender.")
-
-				log.Printf("[INFO] Dispatching to Antigravity CLI (stateless execution)...")
-				replyMarkdown, err = agyRunner.Execute(ctx, promptBuilder.String())
+				// Pass 2: Generate reply with complete context
+				replyPrompt := parser.BuildReplyPrompt(systemPrompt, msg, turns, archiveContext)
+				log.Printf("[INFO] Dispatching reply draft to Antigravity CLI (stateless execution)...")
+				replyMarkdown, err = agyRunner.Execute(ctx, replyPrompt)
 				if err != nil {
 					log.Printf("[ERROR] Antigravity execution failed for UID=%d: %v", msg.UID, err)
 					continue
 				}
 			} else {
-				activeGemini := geminiClient.WithSystemPrompt(activePrompt)
-
-				// 5. Define personal email search callback for Gemini tool use
+				// Define personal email search callback for Gemini dynamic tool use
 				searchCallback := func(query string) (string, error) {
 					log.Printf("[TOOL] Executing search_past_emails: %q", query)
 					results, err := emailDB.SearchEmails(query, 5)
@@ -258,8 +207,8 @@ func main() {
 					return sb.String(), nil
 				}
 
-				// 6. Generate LLM response via Gemini (with tools + multimodal attachments)
-				replyMarkdown, err = activeGemini.GenerateReply(ctx, turns, searchCallback)
+				// Generate LLM response via Gemini (with tools + multimodal attachments)
+				replyMarkdown, err = geminiClient.GenerateReply(ctx, turns, searchCallback)
 				if err != nil {
 					log.Printf("[ERROR] Gemini generation failed for UID=%d: %v", msg.UID, err)
 					continue

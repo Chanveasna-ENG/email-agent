@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/smtp"
 	"os"
 	"path/filepath"
@@ -23,9 +24,55 @@ import (
 	"github.com/emersion/go-message/mail"
 )
 
+// createDialerWithDNS constructs a resilient net.Dialer with DNS fallback support.
+func createDialerWithDNS(dnsServer string, timeout time.Duration) *net.Dialer {
+	dialer := &net.Dialer{
+		Timeout: timeout,
+	}
+
+	var dnsServers []string
+	if cleanDNS := strings.TrimSpace(dnsServer); cleanDNS != "" {
+		if !strings.Contains(cleanDNS, ":") {
+			cleanDNS = net.JoinHostPort(cleanDNS, "53")
+		}
+		dnsServers = append(dnsServers, cleanDNS)
+	}
+	dnsServers = append(dnsServers, "8.8.8.8:53", "1.1.1.1:53")
+
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			var dialErr error
+			for _, srv := range dnsServers {
+				d := net.Dialer{Timeout: 2 * time.Second}
+				conn, err := d.DialContext(ctx, "udp", srv)
+				if err == nil {
+					return conn, nil
+				}
+				dialErr = err
+				// If UDP fails/times out, try TCP on DNS server
+				connTCP, errTCP := d.DialContext(ctx, "tcp", srv)
+				if errTCP == nil {
+					return connTCP, nil
+				}
+			}
+			// Fallback to system resolver
+			d := net.Dialer{Timeout: 2 * time.Second}
+			conn, err := d.DialContext(ctx, network, address)
+			if err == nil {
+				return conn, nil
+			}
+			return nil, fmt.Errorf("all DNS resolvers failed, last err: %v (underlying: %w)", dialErr, err)
+		},
+	}
+	dialer.Resolver = resolver
+	return dialer
+}
+
 // EmailTransport manages IMAP receiving and SMTP sending.
 type EmailTransport struct {
 	cfg         *config.Config
+	dialer      *net.Dialer
 	imapMu      sync.Mutex
 	imapClient  *imapclient.Client
 	newMailChan chan struct{}
@@ -33,8 +80,13 @@ type EmailTransport struct {
 
 // NewTransport initializes a transport instance.
 func NewTransport(cfg *config.Config) *EmailTransport {
+	dnsServer := ""
+	if cfg != nil {
+		dnsServer = cfg.DNSServer
+	}
 	return &EmailTransport{
 		cfg:         cfg,
+		dialer:      createDialerWithDNS(dnsServer, 30*time.Second),
 		newMailChan: make(chan struct{}, 10),
 	}
 }
@@ -49,6 +101,7 @@ func (t *EmailTransport) ConnectIMAP() error {
 	}
 
 	opts := &imapclient.Options{
+		Dialer: t.dialer,
 		UnilateralDataHandler: &imapclient.UnilateralDataHandler{
 			Mailbox: func(data *imapclient.UnilateralDataMailbox) {
 				if data.NumMessages != nil {
@@ -109,6 +162,7 @@ func (t *EmailTransport) ensureIMAPConnected() (*imapclient.Client, error) {
 
 	if t.imapClient == nil {
 		opts := &imapclient.Options{
+			Dialer: t.dialer,
 			UnilateralDataHandler: &imapclient.UnilateralDataHandler{
 				Mailbox: func(data *imapclient.UnilateralDataMailbox) {
 					if data.NumMessages != nil {
@@ -403,9 +457,15 @@ func (t *EmailTransport) SendReply(to, subject, inReplyTo string, references []s
 		ServerName: "smtp.gmail.com",
 	}
 
-	client, err := smtp.Dial(addr)
+	conn, err := t.dialer.DialContext(context.Background(), "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("smtp dial: %w", err)
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, "smtp.gmail.com")
+	if err != nil {
+		return fmt.Errorf("smtp new client: %w", err)
 	}
 	defer client.Close()
 

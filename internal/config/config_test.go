@@ -48,11 +48,32 @@ func TestParseConfig(t *testing.T) {
 	if cfg.AntigravityBin != "agy" {
 		t.Errorf("AntigravityBin default = %q, want agy", cfg.AntigravityBin)
 	}
-	if cfg.SkillsDir != "skills" {
-		t.Errorf("SkillsDir default = %q, want skills", cfg.SkillsDir)
+	if cfg.SystemPromptPath != "config/system_prompt.txt" {
+		t.Errorf("SystemPromptPath default = %q, want config/system_prompt.txt", cfg.SystemPromptPath)
 	}
 	if cfg.WorkspaceDir != "workspace" {
 		t.Errorf("WorkspaceDir default = %q, want workspace", cfg.WorkspaceDir)
+	}
+}
+
+func TestParseConfigDNSServer(t *testing.T) {
+	os.Setenv("GMAIL_ADDRESS", "agent@gmail.com")
+	os.Setenv("GMAIL_APP_PASSWORD", "secret123")
+	os.Setenv("ALLOWED_SENDERS", "alice@domain.com")
+	os.Setenv("DNS_SERVER", "1.1.1.1:53")
+	defer func() {
+		os.Unsetenv("GMAIL_ADDRESS")
+		os.Unsetenv("GMAIL_APP_PASSWORD")
+		os.Unsetenv("ALLOWED_SENDERS")
+		os.Unsetenv("DNS_SERVER")
+	}()
+
+	cfg, err := ParseConfig()
+	if err != nil {
+		t.Fatalf("ParseConfig failed: %v", err)
+	}
+	if cfg.DNSServer != "1.1.1.1:53" {
+		t.Errorf("cfg.DNSServer = %q, want 1.1.1.1:53", cfg.DNSServer)
 	}
 }
 

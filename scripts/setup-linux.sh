@@ -82,10 +82,9 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 if command -v go >/dev/null 2>&1; then
-  echo "==> Rebuilding static Linux binaries (email-agent & email-search)..."
+  echo "==> Rebuilding static Linux binary (email-agent)..."
   mkdir -p "${SCRIPT_DIR}/bin"
   (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-agent ./cmd/email-agent)
-  (cd "${SCRIPT_DIR}" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/email-search ./cmd/email-search)
 elif [ ! -f "${SCRIPT_DIR}/bin/email-agent" ]; then
   echo "[ERROR] 'bin/email-agent' not found and 'go' could not be found." >&2
   echo "        Run 'sudo apt install -y golang-go' and re-run this script." >&2
@@ -122,15 +121,6 @@ mkdir -p /etc/email-agent
 cp "${SCRIPT_DIR}/bin/email-agent" /opt/email-agent/email-agent
 chmod 0755 /opt/email-agent/email-agent
 
-if [ -f "${SCRIPT_DIR}/bin/email-search" ]; then
-  cp "${SCRIPT_DIR}/bin/email-search" /opt/email-agent/workspace/email-search
-  chmod 0755 /opt/email-agent/workspace/email-search
-fi
-
-if [ -d "${SCRIPT_DIR}/skills" ]; then
-  cp -r "${SCRIPT_DIR}/skills" /opt/email-agent/
-fi
-
 # Provision credentials file outside workspace
 if [ ! -f /etc/email-agent/.env ]; then
   if [ -f "${SCRIPT_DIR}/.env" ]; then
@@ -157,7 +147,8 @@ echo "==> Installing hardened systemd service (/etc/systemd/system/email-agent.s
 cat <<'EOF' > /etc/systemd/system/email-agent.service
 [Unit]
 Description=Email AI Assistant Daemon
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
